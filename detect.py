@@ -6,7 +6,7 @@ import time
 
 # --- 1. CONFIGURATION ---
 MODEL_PATH = 'best.pt' # Your trained YOLO model
-JAPANESE_ALLOWLIST = '天地人あいうえおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもやゆよらりるれろわをん品川足立練馬多摩横浜川崎湘南相模札幌函館旭川室蘭釧路帯広北見大阪なにわ和泉01234456789·-'
+JAPANESE_ALLOWLIST = '天地人あいうえおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもやゆよらりるれろわをん品川足立練馬多摩横浜川崎湘南相模札幌函館旭川室蘭釧路帯広北見大阪なにわ和泉0123456789·-'
 
 # --- 2. HELPER FUNCTION ---
 def preprocess_for_ocr(plate_image):
@@ -100,4 +100,5 @@ try:
 finally:
     # 6. Shutdown camera
     picam2.stop()
+
     print("Camera stopped.")
