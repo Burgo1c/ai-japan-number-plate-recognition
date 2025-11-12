@@ -20,9 +20,14 @@
 #include <curl/curl.h>
 #include <sstream>
 
+// Helper macro to convert preprocessor definition to string
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
 // --- 1. CONFIGURATION ---
-const std::string MODEL_PATH = "CPP/best_int8.tflite";
-const std::string DATA_YAML_PATH = "yolov11/data.yaml";
+const std::string PROJECT_ROOT = TOSTRING(PROJECT_SOURCE_DIR);
+const std::string MODEL_PATH = PROJECT_ROOT + "/CPP/best_int8.tflite";
+const std::string DATA_YAML_PATH = PROJECT_ROOT + "/yolov11/data.yaml";
 
 // Model parameters
 const int IMG_SIZE = 640;
@@ -114,7 +119,7 @@ void api_consumer_thread() {
             plate_queue.pop();
         } // Lock is released here
 
-        send_to_api(plate_to_send);
+        //send_to_api(plate_to_send);
     }
     std::cout << "API consumer thread finished." << std::endl;
 }
@@ -307,30 +312,30 @@ int main() {
         }
 
         if (!predictions_list.empty()) {
-            // auto plate_strings = parse_plate_detections(predictions_list);
-            // if (!plate_strings.first.empty() || !plate_strings.second.empty()) {
-            //     std::string complete_plate = plate_strings.first + " " + plate_strings.second;
+            auto plate_strings = parse_plate_detections(predictions_list);
+            if (!plate_strings.first.empty() || !plate_strings.second.empty()) {
+                std::string complete_plate = plate_strings.first + " " + plate_strings.second;
 
-            //     // --- Producer and Cache Logic ---
-            //     bool should_send = false;
-            //     {
-            //         std::lock_guard<std::mutex> lock(queue_mutex);
-            //         auto it = recent_plates.find(complete_plate);
-            //         if (it == recent_plates.end() || std::chrono::steady_clock::now() - it->second > CACHE_DURATION) {
-            //             should_send = true;
-            //             recent_plates[complete_plate] = std::chrono::steady_clock::now();
-            //         }
-            //     }
+                // --- Producer and Cache Logic ---
+                bool should_send = false;
+                {
+                    std::lock_guard<std::mutex> lock(queue_mutex);
+                    auto it = recent_plates.find(complete_plate);
+                    if (it == recent_plates.end() || std::chrono::steady_clock::now() - it->second > CACHE_DURATION) {
+                        should_send = true;
+                        recent_plates[complete_plate] = std::chrono::steady_clock::now();
+                    }
+                }
 
-            //     if (should_send) {
-            //         std::cout << "Queueing plate for API send: " << complete_plate << std::endl;
-            //         {
-            //             std::lock_guard<std::mutex> lock(queue_mutex);
-            //             plate_queue.push(complete_plate);
-            //         }
-            //         queue_cv.notify_one(); // Notify the consumer thread
-            //     }
-            // }
+                if (should_send) {
+                    std::cout << "Queueing plate for API send: " << complete_plate << std::endl;
+                    {
+                        std::lock_guard<std::mutex> lock(queue_mutex);
+                        plate_queue.push(complete_plate);
+                    }
+                    queue_cv.notify_one(); // Notify the consumer thread
+                }
+            }
         }
 
         if (cv::waitKey(1) == 'q') {
