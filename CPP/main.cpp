@@ -6,24 +6,30 @@
 #include <algorithm>
 #include <map>
 #include <chrono>
+#include <thread>
+#include <mutex>
+#include <queue>
+#include <set>
+#include <condition_variable>
 
 #include <opencv2/opencv.hpp>
 #include <tensorflow/lite/interpreter.h>
 #include <tensorflow/lite/kernels/register.h>
 #include <tensorflow/lite/model.h>
 #include <yaml-cpp/yaml.h>
+#include <curl/curl.h>
+#include <sstream>
 
 // --- 1. CONFIGURATION ---
-const std::string MODEL_PATH = "best_int8.tflite";
-const std::string DATA_YAML_PATH = "data.yaml";
-const std::string IMAGE_PATH = "plate1.jpg";
+const std::string MODEL_PATH = "CPP/best_int8.tflite";
+const std::string DATA_YAML_PATH = "yolov11/data.yaml";
 
 // Model parameters
 const int IMG_SIZE = 640;
 const float CONF_THRESHOLD = 0.5f;
 const float IOU_THRESHOLD = 0.45f;
 
-// --- Location Dictionary (from config.py) ---
+// --- Location Dictionary ---
 std::map<std::string, std::string> location_dictionary = {
     {"a", "あ"}, {"adati", "足立"}, {"aidu", "会津"}, {"akita", "秋田"}, {"amami", "奄美"}, {"aomori", "青森"}, {"asahikawa", "旭川"}, {"asuka", "飛鳥"}, {"e", "え"}, {"ehime", "愛媛"},
     {"gihu", "岐阜"}, {"gunma", "群馬"}, {"ha", "は"}, {"hakodate", "函館"}, {"hamamatu", "浜松"}, {"hatinohe", "八戸"}, {"hatiouzi", "八王子"}, {"he", "へ"}, {"hi", "ひ"},
@@ -54,11 +60,70 @@ struct Detection {
     int class_id;
 };
 
+// --- Performance Implementation: Globals for Queue and Cache ---
+std::queue<std::string> plate_queue;
+std::mutex queue_mutex;
+std::condition_variable queue_cv;
+bool finished = false;
+
+std::map<std::string, std::chrono::steady_clock::time_point> recent_plates;
+const std::chrono::seconds CACHE_DURATION(30); // Don't resend the same plate for 30 seconds
+
+void send_to_api(const std::string& complete_plate) {
+    CURL *curl = curl_easy_init();
+    if(curl) {
+        std::string api_url = "http://your.api.endpoint/plate"; // <-- IMPORTANT: CHANGE THIS
+        std::string json_data = "{\"complete_number_plate\": \"" + complete_plate + "\"}";
+
+        curl_easy_setopt(curl, CURLOPT_URL, api_url.c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data.c_str());
+
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); // 10 second timeout
+
+        CURLcode res = curl_easy_perform(curl);
+        if(res != CURLE_OK) {
+            std::cerr << "API call failed: " << curl_easy_strerror(res) << std::endl;
+        } else {
+            std::cout << "Successfully sent plate to API: " << complete_plate << std::endl;
+        }
+
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+    }
+}
+
+// --- Consumer Thread Function ---
+// This function runs in a separate thread, consuming plates from the queue.
+void api_consumer_thread() {
+    while (true) {
+        std::string plate_to_send;
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            // Wait until the queue has something or the program is finished
+            queue_cv.wait(lock, []{ return !plate_queue.empty() || finished; });
+
+            // If the program is finished and the queue is empty, exit the thread
+            if (finished && plate_queue.empty()) {
+                break;
+            }
+
+            plate_to_send = plate_queue.front();
+            plate_queue.pop();
+        } // Lock is released here
+
+        send_to_api(plate_to_send);
+    }
+    std::cout << "API consumer thread finished." << std::endl;
+}
+
+
 // --- 2. PARSING FUNCTION ---
-void parse_plate_detections(const std::vector<Detection>& predictions) {
+std::pair<std::string, std::string> parse_plate_detections(const std::vector<Detection>& predictions) {
     float divider_y = -1.0f;
 
-    // Find the 'NumberPLATE' detection
     for (const auto& p : predictions) {
         if (p.class_name == "NumberPLATE") {
             divider_y = p.y;
@@ -67,50 +132,51 @@ void parse_plate_detections(const std::vector<Detection>& predictions) {
     }
 
     if (divider_y == -1.0f) {
-        std::cerr << "Error: 'NumberPLATE' detection not found." << std::endl;
-        return;
+        return {"", ""};
     }
 
-    std::vector<Detection> top_row, bottom_row;
+    std::vector<Detection> top_row_detections, bottom_row_detections;
     for (const auto& p : predictions) {
         if (p.class_name == "NumberPLATE") continue;
         if (p.y < divider_y) {
-            top_row.push_back(p);
+            top_row_detections.push_back(p);
         } else {
-            bottom_row.push_back(p);
+            bottom_row_detections.push_back(p);
         }
     }
 
-    // Sort rows by x-coordinate
-    std::sort(top_row.begin(), top_row.end(), [](const Detection& a, const Detection& b) {
-        return a.x < b.x;
-    });
-    std::sort(bottom_row.begin(), bottom_row.end(), [](const Detection& a, const Detection& b) {
-        return a.x < b.x;
-    });
+    std::sort(top_row_detections.begin(), top_row_detections.end(), [](const Detection& a, const Detection& b) { return a.x < b.x; });
+    std::sort(bottom_row_detections.begin(), bottom_row_detections.end(), [](const Detection& a, const Detection& b) { return a.x < b.x; });
 
-    // Build strings
-    std::string top_string, bottom_string;
-    for (const auto& p : top_row) {
+    std::stringstream top_ss, bottom_ss;
+    for (const auto& p : top_row_detections) {
         auto it = location_dictionary.find(p.class_name);
-        top_string += (it != location_dictionary.end() ? it->second : p.class_name) + " ";
+        top_ss << (it != location_dictionary.end() ? it->second : p.class_name);
     }
-    for (const auto& p : bottom_row) {
+    for (const auto& p : bottom_row_detections) {
         auto it = location_dictionary.find(p.class_name);
-        bottom_string += (it != location_dictionary.end() ? it->second : p.class_name) + " ";
+        bottom_ss << (it != location_dictionary.end() ? it->second : p.class_name);
     }
+
+    std::string top_string = top_ss.str();
+    std::string bottom_string = bottom_ss.str();
 
     std::cout << "\n--- Parsed License Plate ---" << std::endl;
-    std::cout << "Top Row:    " << top_string << std::endl;
-    std::cout << "Bottom Row: " << bottom_string << std::endl << std::endl;
+    std::cout << "Complete:   " << top_string << " " << bottom_string << std::endl;
+
+    return {top_string, bottom_string};
 }
 
 
 int main() {
+    curl_global_init(CURL_GLOBAL_ALL);
+
+    // --- Start the consumer thread ---
+    std::thread consumer_thread(api_consumer_thread);
+    std::cout << "API consumer thread started." << std::endl;
+
     // --- 3. INITIALIZE MODEL & LOAD DATA ---
     std::cout << "Loading TFLite model..." << std::endl;
-
-    // Load class names
     std::vector<std::string> class_names;
     try {
         YAML::Node data = YAML::LoadFile(DATA_YAML_PATH);
@@ -124,7 +190,6 @@ int main() {
         return -1;
     }
 
-    // Load TFLite model
     auto model = tflite::FlatBufferModel::BuildFromFile(MODEL_PATH.c_str());
     if (!model) {
         std::cerr << "Failed to load model " << MODEL_PATH << std::endl;
@@ -139,139 +204,152 @@ int main() {
         return -1;
     }
 
-    interpreter->SetNumThreads(4);
-
+    // On a 4-core device like a Raspberry Pi 4, using 3 threads for inference
+    // leaves one core free for the OS, the main loop, and the API consumer thread.
+    // This prevents CPU contention and improves overall stability.
+    interpreter->SetNumThreads(3);
     interpreter->AllocateTensors();
 
-    // Get input and output details
     int input_tensor_idx = interpreter->inputs()[0];
-    TfLiteIntArray* input_dims = interpreter->tensor(input_tensor_idx)->dims;
     bool is_int8_model = (interpreter->tensor(input_tensor_idx)->type == kTfLiteUInt8);
-
     std::cout << "Model loaded." << std::endl;
 
-    // --- 4. LOAD, PRE-PROCESS, AND RUN ---
-    std::cout << "Loading image: " << IMAGE_PATH << std::endl;
-    cv::Mat frame = cv::imread(IMAGE_PATH);
-    if (frame.empty()) {
-        std::cerr << "Error: Could not read image." << std::endl;
+    // --- 4. WEBCAM CAPTURE AND CONTINUOUS DETECTION ---
+    cv::VideoCapture cap(0);
+    if (!cap.isOpened()) {
+        std::cerr << "Error: Could not open camera." << std::endl;
         return -1;
     }
+    std::cout << "Camera opened. Starting continuous detection..." << std::endl;
+    std::cout << "Press 'q' to quit." << std::endl;
 
-    std::cout << "Running detection..." << std::endl;
-    auto start_time = std::chrono::high_resolution_clock::now();
+    cv::Mat frame;
+    while (true) {
+        cap >> frame;
+        if (frame.empty()) {
+            std::cerr << "Error: Captured empty frame." << std::endl;
+            break;
+        }
 
-    // Pre-processing
-    int orig_h = frame.rows;
-    int orig_w = frame.cols;
+        // --- Pre-processing ---
+        int orig_h = frame.rows;
+        int orig_w = frame.cols;
+        float scale = std::min(static_cast<float>(IMG_SIZE) / orig_h, static_cast<float>(IMG_SIZE) / orig_w);
+        int new_w = static_cast<int>(orig_w * scale);
+        int new_h = static_cast<int>(orig_h * scale);
 
-    float scale = std::min(static_cast<float>(IMG_SIZE) / orig_h, static_cast<float>(IMG_SIZE) / orig_w);
-    int new_w = static_cast<int>(orig_w * scale);
-    int new_h = static_cast<int>(orig_h * scale);
+        cv::Mat resized_img;
+        cv::resize(frame, resized_img, cv::Size(new_w, new_h));
 
-    cv::Mat resized_img;
-    cv::resize(frame, resized_img, cv::Size(new_w, new_h), 0, 0, cv::INTER_LINEAR);
+        cv::Mat input_img(IMG_SIZE, IMG_SIZE, CV_8UC3, cv::Scalar(114, 114, 114));
+        int top_pad = (IMG_SIZE - new_h) / 2;
+        int left_pad = (IMG_SIZE - new_w) / 2;
+        resized_img.copyTo(input_img(cv::Rect(left_pad, top_pad, new_w, new_h)));
 
-    cv::Mat input_img(IMG_SIZE, IMG_SIZE, CV_8UC3, cv::Scalar(114, 114, 114));
-    int top_pad = (IMG_SIZE - new_h) / 2;
-    int left_pad = (IMG_SIZE - new_w) / 2;
-    resized_img.copyTo(input_img(cv::Rect(left_pad, top_pad, new_w, new_h)));
+        if (is_int8_model) {
+            memcpy(interpreter->typed_tensor<uint8_t>(input_tensor_idx), input_img.data, input_img.total() * input_img.elemSize());
+        } else {
+            cv::Mat float_img;
+            input_img.convertTo(float_img, CV_32F, 1.0 / 255.0);
+            memcpy(interpreter->typed_tensor<float>(input_tensor_idx), float_img.data, float_img.total() * float_img.elemSize());
+        }
 
-    // Prepare input tensor
-    if (is_int8_model) {
-        uint8_t* input_tensor = interpreter->typed_tensor<uint8_t>(input_tensor_idx);
-        memcpy(input_tensor, input_img.data, input_img.total() * input_img.elemSize());
-    } else {
-        cv::Mat float_img;
-        input_img.convertTo(float_img, CV_32F, 1.0 / 255.0);
-        float* input_tensor = interpreter->typed_tensor<float>(input_tensor_idx);
-        memcpy(input_tensor, float_img.data, float_img.total() * float_img.elemSize());
-    }
+        interpreter->Invoke();
 
-    // Run Inference
-    interpreter->Invoke();
+        const float* output_data = interpreter->typed_output_tensor<float>(0);
+        TfLiteIntArray* output_dims = interpreter->tensor(interpreter->outputs()[0])->dims;
+        const int num_proposals = output_dims->data[2];
+        const int num_classes = output_dims->data[1] - 4;
 
-    // Post-processing
-    TfLiteIntArray* output_dims = interpreter->tensor(interpreter->outputs()[0])->dims;
-    const int num_proposals = output_dims->data[2]; // e.g., 8400
-    const int num_elements_per_proposal = output_dims->data[1]; // e.g., 84 (num_classes + 4)
-    const int num_classes = num_elements_per_proposal - 4;
-    const float* output_data = interpreter->typed_output_tensor<float>(0);
+        std::vector<cv::Rect2f> boxes_for_nms;
+        std::vector<float> confidences;
+        std::vector<int> class_ids;
 
-    std::vector<cv::Rect> boxes_for_nms;
-    std::vector<float> confidences;
-    std::vector<int> class_ids;
+        for (int i = 0; i < num_proposals; ++i) {
+            float max_conf = 0.0f;
+            int class_id = -1;
+            for (int j = 0; j < num_classes; ++j) {
+                float conf = output_data[i + (4 + j) * num_proposals];
+                if (conf > max_conf) {
+                    max_conf = conf;
+                    class_id = j;
+                }
+            }
 
-    for (int i = 0; i < num_proposals; ++i) {
-        // Extract box coordinates (cx, cy, w, h) from the planar output
-        float cx = output_data[i + 0 * num_proposals];
-        float cy = output_data[i + 1 * num_proposals];
-        float w = output_data[i + 2 * num_proposals];
-        float h = output_data[i + 3 * num_proposals];
-
-        // Find the class with the highest score
-        float max_conf = 0.0f;
-        int class_id = -1;
-        for (int j = 0; j < num_classes; ++j) {
-            float conf = output_data[i + (4 + j) * num_proposals];
-            if (conf > max_conf) {
-                max_conf = conf;
-                class_id = j;
+            if (max_conf > CONF_THRESHOLD) {
+                float cx = output_data[i + 0 * num_proposals];
+                float cy = output_data[i + 1 * num_proposals];
+                float w = output_data[i + 2 * num_proposals];
+                float h = output_data[i + 3 * num_proposals];
+                boxes_for_nms.emplace_back(cx - w / 2, cy - h / 2, w, h);
+                confidences.push_back(max_conf);
+                class_ids.push_back(class_id);
             }
         }
 
-        if (max_conf > CONF_THRESHOLD) {
-            // Convert [cx, cy, w, h] to [x1, y1, w, h] for NMS
-            boxes_for_nms.emplace_back(static_cast<int>(cx - w / 2), static_cast<int>(cy - h / 2), static_cast<int>(w), static_cast<int>(h));
-            confidences.push_back(max_conf);
-            class_ids.push_back(class_id);
+        std::vector<int> indices;
+        cv::dnn::NMSBoxes(boxes_for_nms, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
+
+        std::vector<Detection> predictions_list;
+        if (!indices.empty()) {
+            for (int i : indices) {
+                cv::Rect2f box = boxes_for_nms[i];
+                Detection det;
+                det.x = (box.x - left_pad) / scale;
+                det.y = (box.y - top_pad) / scale;
+                det.width = box.width / scale;
+                det.height = box.height / scale;
+                det.confidence = confidences[i];
+                det.class_id = class_ids[i];
+                det.class_name = class_names[det.class_id];
+                predictions_list.push_back(det);
+            }
+        }
+
+        if (!predictions_list.empty()) {
+            // auto plate_strings = parse_plate_detections(predictions_list);
+            // if (!plate_strings.first.empty() || !plate_strings.second.empty()) {
+            //     std::string complete_plate = plate_strings.first + " " + plate_strings.second;
+
+            //     // --- Producer and Cache Logic ---
+            //     bool should_send = false;
+            //     {
+            //         std::lock_guard<std::mutex> lock(queue_mutex);
+            //         auto it = recent_plates.find(complete_plate);
+            //         if (it == recent_plates.end() || std::chrono::steady_clock::now() - it->second > CACHE_DURATION) {
+            //             should_send = true;
+            //             recent_plates[complete_plate] = std::chrono::steady_clock::now();
+            //         }
+            //     }
+
+            //     if (should_send) {
+            //         std::cout << "Queueing plate for API send: " << complete_plate << std::endl;
+            //         {
+            //             std::lock_guard<std::mutex> lock(queue_mutex);
+            //             plate_queue.push(complete_plate);
+            //         }
+            //         queue_cv.notify_one(); // Notify the consumer thread
+            //     }
+            // }
+        }
+
+        if (cv::waitKey(1) == 'q') {
+            break;
         }
     }
 
-    std::vector<int> indices;
-    cv::dnn::NMSBoxes(boxes_for_nms, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
-
-    std::vector<Detection> predictions_list;
-    if (!indices.empty()) {
-        for (int i : indices) {
-            cv::Rect box = boxes_for_nms[i];
-
-            float x1_unpad = box.x - left_pad;
-            float y1_unpad = box.y - top_pad;
-
-            float x1_orig = x1_unpad / scale;
-            float y1_orig = y1_unpad / scale;
-            float w_orig = box.width / scale;
-            float h_orig = box.height / scale;
-
-            float x1_clipped = std::max(0.0f, x1_orig);
-            float y1_clipped = std::max(0.0f, y1_orig);
-            float x2_clipped = std::min(static_cast<float>(orig_w), x1_orig + w_orig);
-            float y2_clipped = std::min(static_cast<float>(orig_h), y1_orig + h_orig);
-
-            Detection det;
-            det.width = x2_clipped - x1_clipped;
-            det.height = y2_clipped - y1_clipped;
-            det.x = x1_clipped + det.width / 2;
-            det.y = y1_clipped + det.height / 2;
-            det.confidence = confidences[i];
-            det.class_id = class_ids[i];
-            det.class_name = class_names[det.class_id];
-            predictions_list.push_back(det);
-        }
+    // --- 6. CLEANUP ---
+    std::cout << "Shutting down..." << std::endl;
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        finished = true;
     }
+    queue_cv.notify_one(); // Wake up consumer thread to exit
+    consumer_thread.join(); // Wait for the consumer thread to finish
 
-    auto end_time = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end_time - start_time;
-    std::cout << "Finished detection in " << elapsed.count() << " seconds." << std::endl;
-
-    // --- 5. PARSE RESULTS ---
-    if (!predictions_list.empty()) {
-        std::cout << "Found " << predictions_list.size() << " total detections." << std::endl;
-        parse_plate_detections(predictions_list);
-    } else {
-        std::cout << "No detections found." << std::endl;
-    }
-
+    cap.release();
+    cv::destroyAllWindows();
+    curl_global_cleanup();
+    std::cout << "Program finished." << std::endl;
     return 0;
 }
