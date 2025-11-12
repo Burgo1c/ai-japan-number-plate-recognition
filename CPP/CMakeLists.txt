@@ -44,7 +44,12 @@ include_directories(${CURL_INCLUDE_DIRS})
 # --- 5. Add Executable ---
 add_executable(detector main.cpp)
 
-# --- 6. Link Libraries ---
+# --- 6. Define Project Source Directory ---
+# This passes the top-level source directory to the C++ code
+# so it can build absolute paths to resources.
+target_compile_definitions(detector PRIVATE PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+# --- 7. Link Libraries ---
 target_link_libraries(detector
     PRIVATE
     ${OpenCV_LIBS}
