@@ -47,7 +47,10 @@ add_executable(detector main.cpp)
 # --- 6. Define Project Source Directory ---
 # This passes the top-level source directory to the C++ code
 # so it can build absolute paths to resources.
-target_compile_definitions(detector PRIVATE PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# We use CMAKE_SOURCE_DIR and go one level up to get the true project root,
+# assuming this CMakeLists.txt is in a subdirectory (e.g., /CPP).
+get_filename_component(PROJECT_ROOT "${CMAKE_SOURCE_DIR}/.." ABSOLUTE)
+target_compile_definitions(detector PRIVATE PROJECT_SOURCE_DIR="${PROJECT_ROOT}")
 
 # --- 7. Link Libraries ---
 target_link_libraries(detector
