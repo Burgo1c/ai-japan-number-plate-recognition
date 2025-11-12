@@ -198,7 +198,7 @@ int main() {
     const int num_classes = num_elements_per_proposal - 4;
     const float* output_data = interpreter->typed_output_tensor<float>(0);
 
-    std::vector<cv::Rect2f> boxes_for_nms;
+    std::vector<cv::Rect> boxes_for_nms;
     std::vector<float> confidences;
     std::vector<int> class_ids;
 
@@ -222,7 +222,7 @@ int main() {
 
         if (max_conf > CONF_THRESHOLD) {
             // Convert [cx, cy, w, h] to [x1, y1, w, h] for NMS
-            boxes_for_nms.emplace_back(cx - w / 2, cy - h / 2, w, h);
+            boxes_for_nms.emplace_back(static_cast<int>(cx - w / 2), static_cast<int>(cy - h / 2), static_cast<int>(w), static_cast<int>(h));
             confidences.push_back(max_conf);
             class_ids.push_back(class_id);
         }
@@ -234,7 +234,7 @@ int main() {
     std::vector<Detection> predictions_list;
     if (!indices.empty()) {
         for (int i : indices) {
-            cv::Rect2f box = boxes_for_nms[i];
+            cv::Rect box = boxes_for_nms[i];
 
             float x1_unpad = box.x - left_pad;
             float y1_unpad = box.y - top_pad;
