@@ -1,56 +1,63 @@
-cmake_minimum_required(VERSION 3.16)
-project(YoloTFLiteDetector CXX)
+cmake_minimum_required(VERSION 3.10)
+project(YOLO_Detector)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# --- 1. Find OpenCV ---
+# --- Find Dependencies ---
+
+# 1. OpenCV
 find_package(OpenCV REQUIRED)
-message(STATUS "OpenCV include dirs: ${OpenCV_INCLUDE_DIRS}")
-message(STATUS "OpenCV libraries: ${OpenCV_LIBS}")
+if(NOT OpenCV_FOUND)
+    message(FATAL_ERROR "OpenCV not found. Please set OpenCV_DIR.")
+endif()
 include_directories(${OpenCV_INCLUDE_DIRS})
+link_directories(${OpenCV_LIBRARY_DIRS})
 
-# --- 2. Find YAML-CPP ---
-find_package(yaml-cpp REQUIRED)
-message(STATUS "YAML-CPP include dir: ${yaml-cpp_INCLUDE_DIR}")
-message(STATUS "YAML-CPP library: ${yaml-cpp_LIBRARY}")
-
-# --- 3. Find TFLite (Installed by the .deb package) ---
-find_path(TFLITE_INCLUDE_DIR
-    NAMES "tensorflow/lite/interpreter.h"
-    PATHS "/usr/include" # Standard path where the .deb installs headers
-)
-find_library(TFLITE_LIB
-    NAMES "tensorflow-lite"
-    PATHS "/usr/lib" "/usr/lib/aarch64-linux-gnu" # Standard library paths
-)
-
-if(NOT TFLITE_INCLUDE_DIR OR NOT TFLITE_LIB)
-    message(FATAL_ERROR "TensorFlow Lite library not found. Did you run 'sudo apt install ./tensorflow-lite_64.deb'?")
+# 2. TensorFlow Lite
+# Note: You must have built TFLite from source or downloaded the pre-built library.
+# Set TENSORFLOW_LITE_DIR to the root of your TFLite installation.
+set(TENSORFLOW_LITE_DIR "" CACHE PATH "Path to TensorFlow Lite installation")
+if(NOT TENSORFLOW_LITE_DIR)
+    message(FATAL_ERROR "TENSORFLOW_LITE_DIR is not set. Please point it to your TFLite build/install directory.")
 endif()
 
-message(STATUS "TFLite include dir: ${TFLITE_INCLUDE_DIR}")
-message(STATUS "TFLite library: ${TFLITE_LIB}")
+include_directories(${TENSORFLOW_LITE_DIR}/include)
+# The TFLite library is often named libtensorflow-lite.a
+# The exact name might vary depending on your build.
+find_library(TFLITE_LIB NAMES tensorflow-lite PATHS ${TENSORFLOW_LITE_DIR}/lib)
+if(NOT TFLITE_LIB)
+    message(FATAL_ERROR "TensorFlow Lite library not found in ${TENSORFLOW_LITE_DIR}/lib")
+endif()
 
-include_directories(${TFLITE_INCLUDE_DIR})
+# 3. YAML-CPP
+# You can install this via a package manager (e.g., vcpkg, apt, brew) or build from source.
+find_package(yaml-cpp REQUIRED)
+if(NOT yaml-cpp_FOUND)
+    message(FATAL_ERROR "yaml-cpp not found. Please install it or set yaml-cpp_DIR.")
+endif()
 
-# --- 4. Find cURL (for API calls) ---
+# 3. CURL library
 find_package(CURL REQUIRED)
 message(STATUS "CURL library: ${CURL_LIBRARIES}")
 message(STATUS "CURL include: ${CURL_INCLUDE_DIRS}")
 include_directories(${CURL_INCLUDE_DIRS})
 
+# --- Build Executable ---
 
-# --- 5. Add Executable ---
 add_executable(detector main.cpp)
 
-# --- 6. Link Libraries ---
+# Link all libraries
 target_link_libraries(detector
     PRIVATE
     ${OpenCV_LIBS}
     ${TFLITE_LIB}
-    yaml-cpp::yaml-cpp
+    yaml-cpp
+    # TFLite often requires these additional libraries
+    pthread
+    dl
     CURL::libcurl
-    pthread # Needed for TFLite threads and std::thread
-    dl      # Needed by TFLite
 )
+
+# --- Installation (Optional) ---
+install(TARGETS detector DESTINATION bin)
