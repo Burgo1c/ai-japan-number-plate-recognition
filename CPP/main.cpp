@@ -292,8 +292,14 @@ int main() {
             }
         }
 
+        // Convert Rect2f to Rect for NMSBoxes compatibility with older OpenCV versions
+        std::vector<cv::Rect> boxes_for_nms_int;
+        for(const auto& box : boxes_for_nms) {
+            boxes_for_nms_int.emplace_back(box);
+        }
+
         std::vector<int> indices;
-        cv::dnn::NMSBoxes(boxes_for_nms, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
+        cv::dnn::NMSBoxes(boxes_for_nms_int, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
 
         std::vector<Detection> predictions_list;
         if (!indices.empty()) {
