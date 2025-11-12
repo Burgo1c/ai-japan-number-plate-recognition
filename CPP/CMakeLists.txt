@@ -25,7 +25,6 @@
 #define TOSTRING(x) STRINGIFY(x)
 
 // --- 1. CONFIGURATION ---
-const std::string PROJECT_ROOT = TOSTRING(PROJECT_SOURCE_DIR);
 const std::string MODEL_PATH = "../best_int8.tflite";
 const std::string DATA_YAML_PATH = "../data.yaml";
 
