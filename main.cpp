@@ -301,7 +301,6 @@ int main() {
         int top_pad = (IMG_SIZE - new_h) / 2;
         int left_pad = (IMG_SIZE - new_w) / 2;
         resized_img.copyTo(input_img(cv::Rect(left_pad, top_pad, new_w, new_h)));
->>>>>>> Stashed changes
 
         if (is_int8_model) {
             memcpy(interpreter->typed_tensor<uint8_t>(input_tensor_idx), input_img.data, input_img.total() * input_img.elemSize());
