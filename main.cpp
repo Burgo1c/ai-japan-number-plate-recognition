@@ -132,39 +132,66 @@ void api_consumer_thread() {
     std::cout << "API consumer thread finished." << std::endl;
 }
 
+// --- 2. PARSING FUNCTION (FIXED) ---
+// This new version finds the divider by looking for the largest vertical gap
+// between characters. It does not need a "NumberPLATE" detection.
+std::string parse_plate_detections(std::vector<Detection>& predictions) {
+    
+    // We need at least 2 characters to find a top and bottom row
+    if (predictions.size() < 2) {
+        return ""; // Can't determine rows
+    }
 
-// --- 2. PARSING FUNCTION (MODIFIED) ---
-std::string parse_plate_detections(const std::vector<Detection>& predictions) {
-    float divider_y = -1.0f;
+    // 1. Sort all detections by their vertical center
+    std::sort(predictions.begin(), predictions.end(), [](const Detection& a, const Detection& b) {
+        return (a.y + a.height / 2.0f) < (b.y + b.height / 2.0f);
+    });
 
-    // Find the license plate and calculate its vertical center.
-    for (const auto& p : predictions) {
-        if (p.class_name == "NumberPLATE") {
-            divider_y = p.y + p.height / 2.0f;
-            break;
+    // 2. Find the largest vertical gap between consecutive characters
+    float max_gap = 0.0f;
+    int max_gap_index = -1; // Index of the character *before* the largest gap
+    
+    for (size_t i = 0; i < predictions.size() - 1; ++i) {
+        float y_center_curr = predictions[i].y + predictions[i].height / 2.0f;
+        float y_center_next = predictions[i+1].y + predictions[i+1].height / 2.0f;
+        float gap = y_center_next - y_center_curr;
+
+        // A gap is only valid if it's larger than any we've seen,
+        // AND larger than a fraction of a character's height (to avoid noise)
+        if (gap > max_gap && gap > (predictions[i].height * 0.5f)) {
+            max_gap = gap;
+            max_gap_index = i;
         }
     }
 
-    // If no plate is found, we can't proceed.
-    if (divider_y == -1.0f) {
-        return ""; // Return an empty string
-    }
-
-    // We only need to store the bottom row
+    float divider_y;
     std::vector<Detection> bottom_row_detections;
-    for (const auto& p : predictions) {
-        if (p.class_name == "NumberPLATE") continue;
-        
-        // Use the character's vertical center for comparison.
-        // If it's not less than the divider, it's in the bottom row.
-        if ((p.y + p.height / 2.0f) >= divider_y) {
-            bottom_row_detections.push_back(p);
+
+    if (max_gap_index == -1) {
+        // No significant gap was found, meaning all characters are
+        // likely on a single row (e.g., a motorcycle plate).
+        // Since we can't be sure if it's a top or bottom row, we'll
+        // assume it's the "bottom" row for simplicity.
+        bottom_row_detections = predictions; // Use all detections
+    } else {
+        // A gap was found! Set the divider in the middle of the gap.
+        float y_top_of_gap = predictions[max_gap_index].y + predictions[max_gap_index].height / 2.0f;
+        divider_y = y_top_of_gap + (max_gap / 2.0f);
+
+        // 3. Populate the bottom row
+        for (const auto& p : predictions) {
+            // If the character's center is below the divider, it's in the bottom row
+            if ((p.y + p.height / 2.0f) >= divider_y) {
+                bottom_row_detections.push_back(p);
+            }
         }
     }
 
-    // Sort only the bottom row
-    std::sort(bottom_row_detections.begin(), bottom_row_detections.end(), [](const Detection& a, const Detection& b) { return a.x < b.x; });
+    // 4. Sort the *bottom row* by its horizontal 'x' position
+    std::sort(bottom_row_detections.begin(), bottom_row_detections.end(), 
+              [](const Detection& a, const Detection& b) { return a.x < b.x; });
 
+    // 5. Build the final string
     std::stringstream bottom_ss;
     for (const auto& p : bottom_row_detections) {
         auto it = location_dictionary.find(p.class_name);
@@ -174,11 +201,10 @@ std::string parse_plate_detections(const std::vector<Detection>& predictions) {
     std::string bottom_string = bottom_ss.str();
 
     std::cout << "\n--- Parsed License Plate ---" << std::endl;
-    std::cout << "Bottom Row: " << bottom_string << std::endl; // Changed to only show bottom row
+    std::cout << "Bottom Row: " << bottom_string << std::endl; 
 
     return bottom_string; // Return only the bottom string
 }
-
 
 int main() {
     // Register signal handler for Ctrl+C (SIGINT)
@@ -303,13 +329,9 @@ int main() {
         }
 
         // Convert Rect2f to Rect for NMSBoxes compatibility with older OpenCV versions
-        std::vector<cv::Rect> boxes_for_nms_int;
-        for(const auto& box : boxes_for_nms) {
-            boxes_for_nms_int.emplace_back(box);
-        }
-
         std::vector<int> indices;
-        cv::dnn::NMSBoxes(boxes_for_nms_int, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
+        // Pass the float vector directly. No conversion needed.
+        cv::dnn::NMSBoxes(boxes_for_nms, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
 
         std::vector<Detection> predictions_list;
         if (!indices.empty()) {
@@ -328,11 +350,11 @@ int main() {
         }
 
         // <--- ADD THIS DEBUG CODE --->
-        std::cout << "--- RAW DETECTIONS (" << predictions_list.size() << ") ---" << std::endl;
-        for (const auto& det : predictions_list) {
-            std::cout << "  Class: " << det.class_name
-                      << ", Conf: " << det.confidence << std::endl;
-        }
+        // std::cout << "--- RAW DETECTIONS (" << predictions_list.size() << ") ---" << std::endl;
+        // for (const auto& det : predictions_list) {
+        //     std::cout << "  Class: " << det.class_name
+        //               << ", Conf: " << det.confidence << std::endl;
+        // }
         // <--- END DEBUG CODE --->
         
         // --- THIS SECTION IS MODIFIED ---
