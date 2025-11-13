@@ -277,75 +277,57 @@ int main() {
         const int num_proposals = output_dims->data[2];
         const int num_classes = output_dims->data[1] - 4;
 
-        // --- START NMS FIX ---
-        std::vector<cv::Rect2f> char_boxes_for_nms;
-        std::vector<float> char_confidences;
-        std::vector<int> char_class_ids;
-        std::vector<Detection> plate_detections; 
+        // --- Post-processing with NMS for ALL classes ---
+        std::vector<cv::Rect> boxes_for_nms;
+        std::vector<float> confidences_for_nms;
+        std::vector<int> class_ids_for_nms;
 
         for (int i = 0; i < num_proposals; ++i) {
             float max_conf = 0.0f;
             int class_id = -1;
+            const float* class_scores = output_data + (i + 4 * num_proposals);
+
             for (int j = 0; j < num_classes; ++j) {
-                float conf = output_data[i + (4 + j) * num_proposals];
-                if (conf > max_conf) {
-                    max_conf = conf;
+                if (class_scores[j * num_proposals] > max_conf) {
+                    max_conf = class_scores[j * num_proposals];
                     class_id = j;
                 }
             }
 
             if (max_conf > CONF_THRESHOLD) {
-                std::string class_name = class_names[class_id];
-                
                 float cx = output_data[i + 0 * num_proposals];
                 float cy = output_data[i + 1 * num_proposals];
                 float w = output_data[i + 2 * num_proposals];
                 float h = output_data[i + 3 * num_proposals];
-                
-                if (class_name == "NumberPLATE") {
-                    Detection det;
-                    det.x = (cx - w / 2 - left_pad) / scale;
-                    det.y = (cy - h / 2 - top_pad) / scale;
-                    det.width = w / scale;
-                    det.height = h / scale;
-                    det.confidence = max_conf;
-                    det.class_id = class_id;
-                    det.class_name = class_name;
-                    plate_detections.push_back(det);
-                } else {
-                    char_boxes_for_nms.emplace_back(cx - w / 2, cy - h / 2, w, h);
-                    char_confidences.push_back(max_conf);
-                    char_class_ids.push_back(class_id);
-                }
+
+                int left = static_cast<int>(cx - w / 2);
+                int top = static_cast<int>(cy - h / 2);
+                int width = static_cast<int>(w);
+                int height = static_cast<int>(h);
+
+                boxes_for_nms.emplace_back(left, top, width, height);
+                confidences_for_nms.push_back(max_conf);
+                class_ids_for_nms.push_back(class_id);
             }
         }
 
-        std::vector<cv::Rect> char_boxes_for_nms_int;
-        for(const auto& box : char_boxes_for_nms) {
-            char_boxes_for_nms_int.emplace_back(box);
+        std::vector<int> final_indices;
+        cv::dnn::NMSBoxes(boxes_for_nms, confidences_for_nms, CONF_THRESHOLD, IOU_THRESHOLD, final_indices);
+
+        std::vector<Detection> predictions_list;
+        for (int i : final_indices) {
+            cv::Rect box = boxes_for_nms[i];
+            Detection det;
+            det.x = (static_cast<float>(box.x) - left_pad) / scale;
+            det.y = (static_cast<float>(box.y) - top_pad) / scale;
+            det.width = static_cast<float>(box.width) / scale;
+            det.height = static_cast<float>(box.height) / scale;
+            det.confidence = confidences_for_nms[i];
+            det.class_id = class_ids_for_nms[i];
+            det.class_name = class_names[det.class_id];
+            predictions_list.push_back(det);
         }
-
-        std::vector<int> char_indices;
-        cv::dnn::NMSBoxes(char_boxes_for_nms_int, char_confidences, CONF_THRESHOLD, IOU_THRESHOLD, char_indices);
-
-        std::vector<Detection> predictions_list; 
-        predictions_list = plate_detections;
-
-        if (!char_indices.empty()) {
-            for (int i : char_indices) {
-                cv::Rect2f box = char_boxes_for_nms[i]; 
-                Detection det;
-                det.x = (box.x - left_pad) / scale;
-                det.y = (box.y - top_pad) / scale;
-                det.width = box.width / scale;
-                det.height = box.height / scale;
-                det.confidence = char_confidences[i];
-                det.class_id = char_class_ids[i];
-                det.class_name = class_names[det.class_id];
-                predictions_list.push_back(det);
-            }
-        }
-        // --- END NMS FIX ---
+        // --- End of NMS ---
 
         // +++ START DEBUG LOGGING +++
         std::cout << "\n--- Raw Detections (Post-NMS) ---" << std::endl;
