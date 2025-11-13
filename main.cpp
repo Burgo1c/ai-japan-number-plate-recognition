@@ -355,11 +355,11 @@ int main() {
         }
 
         // <--- ADD THIS DEBUG CODE --->
-        // std::cout << "--- RAW DETECTIONS (" << predictions_list.size() << ") ---" << std::endl;
-        // for (const auto& det : predictions_list) {
-        //     std::cout << "  Class: " << det.class_name
-        //               << ", Conf: " << det.confidence << std::endl;
-        // }
+        std::cout << "--- RAW DETECTIONS (" << predictions_list.size() << ") ---" << std::endl;
+        for (const auto& det : predictions_list) {
+            std::cout << "  Class: " << det.class_name
+                      << ", Conf: " << det.confidence << std::endl;
+        }
         // <--- END DEBUG CODE --->
         
         // --- THIS SECTION IS MODIFIED ---
