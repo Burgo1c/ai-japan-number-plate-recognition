@@ -129,6 +129,7 @@ void api_consumer_thread() {
             plate_queue.pop();
         } // Lock is released here
 
+        // --- API CALL REMAINS COMMENTED AS REQUESTED ---
         //send_to_api(plate_to_send);
     }
     std::cout << "API consumer thread finished." << std::endl;
@@ -317,9 +318,12 @@ int main() {
         const int num_proposals = output_dims->data[2];
         const int num_classes = output_dims->data[1] - 4;
 
-        std::vector<cv::Rect2f> boxes_for_nms;
-        std::vector<float> confidences;
-        std::vector<int> class_ids;
+        // --- START NMS FIX ---
+        // Create separate lists for plates and characters
+        std::vector<cv::Rect2f> char_boxes_for_nms;
+        std::vector<float> char_confidences;
+        std::vector<int> char_class_ids;
+        std::vector<Detection> plate_detections; // Store final NumberPLATE detections
 
         for (int i = 0; i < num_proposals; ++i) {
             float max_conf = 0.0f;
@@ -333,48 +337,66 @@ int main() {
             }
 
             if (max_conf > CONF_THRESHOLD) {
+                std::string class_name = class_names[class_id];
+                
                 float cx = output_data[i + 0 * num_proposals];
                 float cy = output_data[i + 1 * num_proposals];
                 float w = output_data[i + 2 * num_proposals];
                 float h = output_data[i + 3 * num_proposals];
-                boxes_for_nms.emplace_back(cx - w / 2, cy - h / 2, w, h);
-                confidences.push_back(max_conf);
-                class_ids.push_back(class_id);
+                
+                if (class_name == "NumberPLATE") {
+                    // This is a plate, save it directly after un-scaling
+                    Detection det;
+                    det.x = (cx - w / 2 - left_pad) / scale;
+                    det.y = (cy - h / 2 - top_pad) / scale;
+                    det.width = w / scale;
+                    det.height = h / scale;
+                    det.confidence = max_conf;
+                    det.class_id = class_id;
+                    det.class_name = class_name;
+                    plate_detections.push_back(det);
+                } else {
+                    // This is a character, add its *scaled* box for NMS
+                    char_boxes_for_nms.emplace_back(cx - w / 2, cy - h / 2, w, h);
+                    char_confidences.push_back(max_conf);
+                    char_class_ids.push_back(class_id);
+                }
             }
         }
 
-        // Convert Rect2f to Rect for NMSBoxes compatibility with older OpenCV versions
-        std::vector<cv::Rect> boxes_for_nms_int;
-        for(const auto& box : boxes_for_nms) {
-            boxes_for_nms_int.emplace_back(box);
+        // Convert char boxes for NMS
+        std::vector<cv::Rect> char_boxes_for_nms_int;
+        for(const auto& box : char_boxes_for_nms) {
+            char_boxes_for_nms_int.emplace_back(box);
         }
 
-        std::vector<int> indices;
-        cv::dnn::NMSBoxes(boxes_for_nms_int, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
+        std::vector<int> char_indices;
+        cv::dnn::NMSBoxes(char_boxes_for_nms_int, char_confidences, CONF_THRESHOLD, IOU_THRESHOLD, char_indices);
 
-        std::vector<Detection> predictions_list;
-        if (!indices.empty()) {
-            for (int i : indices) {
-                cv::Rect2f box = boxes_for_nms[i];
+        // This is the new final list
+        std::vector<Detection> predictions_list; 
+        
+        // 1. Add all the plates we found
+        predictions_list = plate_detections;
+
+        // 2. Add all the NMS-approved characters
+        if (!char_indices.empty()) {
+            for (int i : char_indices) {
+                cv::Rect2f box = char_boxes_for_nms[i]; // Use the original float box
                 Detection det;
+                // Un-scale the box coordinates
                 det.x = (box.x - left_pad) / scale;
                 det.y = (box.y - top_pad) / scale;
                 det.width = box.width / scale;
                 det.height = box.height / scale;
-                det.confidence = confidences[i];
-                det.class_id = class_ids[i];
+                det.confidence = char_confidences[i];
+                det.class_id = char_class_ids[i];
                 det.class_name = class_names[det.class_id];
                 predictions_list.push_back(det);
             }
         }
+        // --- END NMS FIX ---
 
-        // <--- ADD THIS DEBUG CODE --->
-        std::cout << "--- RAW DETECTIONS (" << predictions_list.size() << ") ---" << std::endl;
-        for (const auto& det : predictions_list) {
-            std::cout << "  Class: " << det.class_name
-                    << ", Conf: " << det.confidence << std::endl;
-        }
-        // <--- END DEBUG CODE --->
         
         if (!predictions_list.empty()) {
             std::string ocr_top_row;
@@ -391,9 +413,22 @@ int main() {
 
                     if (plate_roi.width > 0 && plate_roi.height > 0) {
                         cv::Mat plate_img = frame(plate_roi);
+                        
+                        // --- START OCR IMPROVEMENT ---
+                        // Crop to the top 60% of the plate for better accuracy
+                        cv::Rect ocr_crop_roi(
+                            0, 
+                            0, 
+                            plate_img.cols, 
+                            static_cast<int>(plate_img.rows * 0.6)
+                        );
+                        cv::Mat top_half_plate = plate_img(ocr_crop_roi);
+                        // --- END OCR IMPROVEMENT ---
+
                         // Pre-process for OCR: grayscale and threshold
                         cv::Mat gray_plate, thresh_plate;
-                        cv::cvtColor(plate_img, gray_plate, cv::COLOR_BGR2GRAY);
+                        // Run pre-processing on the *cropped* image
+                        cv::cvtColor(top_half_plate, gray_plate, cv::COLOR_BGR2GRAY);
                         cv::threshold(gray_plate, thresh_plate, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
                         ocr_top_row = run_ocr(thresh_plate);
                     }
