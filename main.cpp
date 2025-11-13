@@ -330,7 +330,7 @@ int main() {
 
         // Convert Rect2f to Rect for NMSBoxes compatibility with older OpenCV versions
         std::vector<int> indices;
-        // Pass the float vector directly. No conversion needed.
+        // Pass the float vector directly. No conversion needed.
         cv::dnn::NMSBoxes(boxes_for_nms, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
 
         std::vector<Detection> predictions_list;
