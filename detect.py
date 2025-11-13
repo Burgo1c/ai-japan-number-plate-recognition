@@ -1,11 +1,10 @@
 import cv2
 import numpy as np
 import time
+from ultralytics import YOLO
+import easyocr
 import threading
 import queue
-import easyocr
-import yaml
-from ultralytics import YOLO
 
 # --- 1. CONFIGURATION ---
 MODEL_PATH = 'ai-model/best.pt'
@@ -13,21 +12,7 @@ CONF_THRESHOLD = 0.5
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
-# --- Load Class Names ---
-try:
-    with open('ai-model/data.yaml', 'r') as f:
-        data_yaml = yaml.safe_load(f)
-    class_names = data_yaml['names']
-except FileNotFoundError:
-    print("Error: 'ai-model/data.yaml' not found.")
-    print("Please ensure the data.yaml file is in the correct location.")
-    exit()
-except Exception as e:
-    print(f"Error loading data.yaml: {e}")
-    exit()
-
-
-# Location Dictionary (remains the same)
+# Location Dictionary
 location_dictionary = {
     "a": "あ", "adati": "足立", "aidu": "会津", "akita": "秋田", "amami": "奄美", "aomori": "青森", "asahikawa": "旭川", "asuka": "飛鳥", "e": "え", "ehime": "愛媛",
     "gihu": "岐阜", "gunma": "群馬", "ha": "は", "hakodate": "函館", "hamamatu": "浜松", "hatinohe": "八戸", "hatiouzi": "八王子", "he": "へ", "hi": "ひ",
@@ -40,7 +25,7 @@ location_dictionary = {
     "kumamoto": "熊本", "kurasiki": "倉敷", "kusiro": "釧路", "kyoto": "京都", "ma": "ま", "maebashi": "前橋", "matudo": "松戸", "matumoto": "松本",
     "me": "め", "mi": "み", "mie": "三重", "mikawa": "三河", "mito": "水戸", "miyagi": "宮城", "miyazaki": "宮崎", "mo": "も", "morioka": "盛岡",
     "mu": "む", "muroran": "室蘭", "na": "な", "nagano": "長野", "nagaoka": "長岡", "nagasaki": "長崎", "nagoya": "名古屋", "naniwa": "なにわ",
-    "nara": "奈良", "narasino": "習志னோ", "narita": "成田", "nasu": "那須", "ne": "ね", "nerima": "練馬", "ni": "に", "nigata": "新潟", "no": "の",
+    "nara": "奈良", "narasino": "習志野", "narita": "成田", "nasu": "那須", "ne": "ね", "nerima": "練馬", "ni": "に", "nigata": "新潟", "no": "の",
     "noda": "野田", "nu": "ぬ", "numadu": "沼津", "o": "お", "obihiro": "帯広", "oita": "大分", "okayama": "岡山", "okazaki": "岡崎", "okinawa": "沖縄",
     "omiya": "大宮", "osaka": "大阪", "owarikomaki": "尾張小牧", "ra": "ら", "re": "れ", "ri": "り", "ro": "ろ", "ru": "る", "sa": "さ", "saga": "佐賀",
     "sagami": "相模", "sakai": "堺", "sasebo": "佐世保", "se": "せ", "sendai": "仙台", "setagaya": "世田谷", "si": "し", "siga": "滋賀",
@@ -62,7 +47,6 @@ except Exception as e:
     print("Please ensure 'ultralytics' is installed (pip install ultralytics)")
     print("and the model file is in the correct location.")
     exit()
-
 
 print("Loading EasyOCR model...")
 try:
@@ -133,18 +117,12 @@ def worker():
             
             if plate_img.size > 0:
                 try:
-                    ocr_result = reader.readtext(plate_img, detail=0, paragraph=True)
+                    # Set paragraph=False to get line-by-line results
+                    ocr_result = reader.readtext(plate_img, detail=0, paragraph=False)
                     if ocr_result:
-                        # Assume the first line of OCR result contains the location
-                        full_ocr_text = " ".join(ocr_result)
-                        # Heuristic: Find the first non-numeric/non-latin part as the location
-                        parts = full_ocr_text.split()
-                        for part in parts:
-                            # A simple check for Japanese characters
-                            if any('\u3040' <= char <= '\u309f' or '\u30a0' <= char <= '\u30ff' or '\u4e00' <= char <= '\u9faf' for char in part):
-                                # Filter to keep only Japanese characters
-                                ocr_top = "".join(c for c in part if '\u3040' <= c <= '\u309f' or '\u30a0' <= c <= '\u30ff' or '\u4e00' <= c <= '\u9faf')
-                                break
+                        # The first line of the OCR result is the top row of the plate.
+                        # This should give us the location and number, e.g., "横浜 101".
+                        ocr_top = ocr_result[0]
                 except Exception as e:
                     print(f"EasyOCR Error: {e}")
                     ocr_top = "OCR Error"
@@ -154,7 +132,7 @@ def worker():
         final_bottom = yolo_bottom if yolo_bottom else ""
 
         # Pass all results to the main thread
-        result_queue.put((final_top, final_bottom))
+        result_queue.put((final_top, final_bottom, yolo_results[0].boxes))
 
 # --- 5. MAIN THREAD FOR CAMERA AND CONSOLE ---
 print("Starting camera feed...")
@@ -187,18 +165,13 @@ try:
         if frame_queue.empty():
             frame_queue.put(frame.copy())
 
-        # Get results from the queue if available
+        # Get results from the queue if available and draw
         try:
-            # We only care about the parsed strings for console output
-            final_top, final_bottom = result_queue.get_nowait()
+            final_top, final_bottom, boxes = result_queue.get_nowait()
             
             # --- CONSOLE OUTPUT ---
-            # Only print if a valid new result is found
+            # Ignoring top row as per user request to focus on bottom row.
             new_result = False
-            if final_top and final_top != last_printed_top:
-                last_printed_top = final_top
-                new_result = True
-                
             if final_bottom and final_bottom != last_printed_bottom:
                 last_printed_bottom = final_bottom
                 new_result = True
@@ -206,15 +179,11 @@ try:
             if new_result:
                 print("--- Plate Detected ---")
                 print(f"Time:   {time.strftime('%Y-%m-%d %H:%M:%S')}")
-                print(f"Top:    {last_printed_top}")
                 print(f"Bottom: {last_printed_bottom}")
                 print("----------------------")
             
         except queue.Empty:
             pass # No new result, just keep looping
-        
-        # Give a tiny break to the CPU
-        time.sleep(0.01)
 
 except KeyboardInterrupt:
     print("\nCaught Ctrl+C. Shutting down...")
