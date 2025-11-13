@@ -27,8 +27,9 @@
 
 // !!! IMPORTANT !!!
 // Change this to the path of your NEW float16 model
-const std::string MODEL_PATH = "/home/raspi/ai-japan-number-plate-recognition/ai-model/best_fp16.tflite";
+const std::string MODEL_PATH = "/home/raspi/ai-japan-number-plate-recognition/ai-model/best_float16.tflite";
 const std::string DATA_YAML_PATH = "/home/raspi/ai-japan-number-plate-recognition/ai-model/data.yaml";
+const std::string IMAGE_PATH = "/home/raspi/ai-japan-number-plate-recognition/test/plate1.jpg";
 
 // Model parameters
 const int IMG_SIZE = 640;
@@ -76,60 +77,6 @@ std::map<std::string, std::chrono::steady_clock::time_point> recent_plates;
 const std::chrono::seconds CACHE_DURATION(30);
 
 // --- Graceful Shutdown ---
-volatile sig_atomic_t g_running = 1;
-void signal_handler(int signum) {
-    g_running = 0;
-    std::cout << "\nCaught signal " << signum << ", shutting down..." << std::endl;
-}
-
-
-void send_to_api(const std::string& complete_plate) {
-    CURL *curl = curl_easy_init();
-    if(curl) {
-        std::string api_url = "http://your.api.endpoint/plate"; // <-- IMPORTANT: CHANGE THIS
-        std::string json_data = "{\"complete_number_plate\": \"" + complete_plate + "\"}";
-
-        curl_easy_setopt(curl, CURLOPT_URL, api_url.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data.c_str());
-
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); 
-
-        CURLcode res = curl_easy_perform(curl);
-        if(res != CURLE_OK) {
-            std::cerr << "API call failed: " << curl_easy_strerror(res) << std::endl;
-        } else {
-            std::cout << "Successfully sent plate to API: " << complete_plate << std::endl;
-        }
-
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-    }
-}
-
-// --- Consumer Thread Function ---
-void api_consumer_thread() {
-    while (true) {
-        std::string plate_to_send;
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            queue_cv.wait(lock, []{ return !plate_queue.empty() || finished; });
-
-            if (finished && plate_queue.empty()) {
-                break;
-            }
-
-            plate_to_send = plate_queue.front();
-            plate_queue.pop();
-        } 
-
-        // --- API CALL REMAINS COMMENTED AS REQUESTED ---
-        //send_to_api(plate_to_send);
-    }
-    std::cout << "API consumer thread finished." << std::endl;
-}
 
 // --- OCR Function ---
 std::string run_ocr(const cv::Mat& image) {
@@ -248,12 +195,6 @@ std::pair<std::string, std::string> parse_plate_detections(const std::vector<Det
 
 
 int main() {
-    signal(SIGINT, signal_handler);
-    curl_global_init(CURL_GLOBAL_ALL);
-
-    std::thread consumer_thread(api_consumer_thread);
-    std::cout << "API consumer thread started." << std::endl;
-
     // --- 3. INITIALIZE MODEL & LOAD DATA ---
     std::cout << "Loading TFLite model..." << std::endl;
     std::vector<std::string> class_names;
@@ -291,22 +232,13 @@ int main() {
     std::cout << "Model loaded." << (input_type == kTfLiteFloat32 ? " (Float32)" : (input_type == kTfLiteFloat16 ? " (Float16)" : " (Int8/Other)")) << std::endl;
 
 
-    // --- 4. WEBCAM CAPTURE AND CONTINUOUS DETECTION ---
-    cv::VideoCapture cap(0);
-    if (!cap.isOpened()) {
-        std::cerr << "Error: Could not open camera." << std::endl;
+    // --- 4. IMAGE CAPTURE AND DETECTION ---
+    cv::Mat frame = cv::imread(IMAGE_PATH);
+    if (frame.empty()) {
+        std::cerr << "Error: Could not open image at " << IMAGE_PATH << std::endl;
         return -1;
     }
-    std::cout << "Camera opened. Starting continuous detection..." << std::endl;
-    std::cout << "Press 'q' to quit." << std::endl;
-
-    cv::Mat frame;
-    while (g_running) {
-        cap >> frame;
-        if (frame.empty()) {
-            std::cerr << "Error: Captured empty frame." << std::endl;
-            break;
-        }
+    std::cout << "Image loaded." << std::endl;
 
         // --- Pre-processing ---
         int orig_h = frame.rows;
@@ -415,7 +347,17 @@ int main() {
         }
         // --- END NMS FIX ---
 
-        
+        // +++ START DEBUG LOGGING +++
+        std::cout << "\n--- Raw Detections (Post-NMS) ---" << std::endl;
+        std::cout << "Found " << predictions_list.size() << " detections." << std::endl;
+        for (const auto& det : predictions_list) {
+            std::cout << "Class: " << det.class_name
+                      << ", Conf: " << det.confidence
+                      << ", X: " << det.x << ", Y: " << det.y
+                      << ", W: " << det.width << ", H: " << det.height << std::endl;
+        }
+        // +++ END DEBUG LOGGING +++
+
         if (!predictions_list.empty()) {
             std::string ocr_top_row;
             for (const auto& det : predictions_list) {
@@ -430,15 +372,13 @@ int main() {
                     if (plate_roi.width > 0 && plate_roi.height > 0) {
                         cv::Mat plate_img = frame(plate_roi);
                         
-                        // --- START OCR IMPROVEMENT ---
                         cv::Rect ocr_crop_roi(
                             0, 
                             0, 
                             plate_img.cols, 
-                            static_cast<int>(plate_img.rows * 0.6) // Crop to top 60%
+                            static_cast<int>(plate_img.rows * 0.6)
                         );
                         cv::Mat top_half_plate = plate_img(ocr_crop_roi);
-                        // --- END OCR IMPROVEMENT ---
 
                         cv::Mat gray_plate, thresh_plate;
                         cv::cvtColor(top_half_plate, gray_plate, cv::COLOR_BGR2GRAY);
@@ -452,43 +392,13 @@ int main() {
             auto plate_strings = parse_plate_detections(predictions_list, ocr_top_row);
             if (!plate_strings.first.empty() || !plate_strings.second.empty()) {
                 std::string complete_plate = plate_strings.first + " " + plate_strings.second;
-
-                // --- Producer and Cache Logic ---
-                bool should_send = false;
-                {
-                    std::lock_guard<std::mutex> lock(queue_mutex);
-                    auto it = recent_plates.find(complete_plate);
-                    if (it == recent_plates.end() || std::chrono::steady_clock::now() - it->second > CACHE_DURATION) {
-                        should_send = true;
-                        recent_plates[complete_plate] = std::chrono::steady_clock::now();
-                    }
-                }
-
-                if (should_send) {
-                    std::cout << "Queueing plate for API send: " << complete_plate << std::endl;
-                    {
-                        std::lock_guard<std::mutex> lock(queue_mutex);
-                        plate_queue.push(complete_plate);
-                    }
-                    queue_cv.notify_one(); 
-                }
+                std::cout << "\n--- Final Result ---" << std::endl;
+                std::cout << "Complete Plate: " << complete_plate << std::endl;
             }
         }
 
-    }
-
     // --- 6. CLEANUP ---
-    std::cout << "Shutting down..." << std::endl;
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex);
-        finished = true;
-    }
-    queue_cv.notify_one(); 
-    consumer_thread.join(); 
-
-    cap.release();
     cv::destroyAllWindows();
-    curl_global_cleanup();
     std::cout << "Program finished." << std::endl;
     return 0;
 }
