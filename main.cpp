@@ -312,7 +312,7 @@ int main() {
         }
 
         std::vector<int> final_indices;
-        cv::dnn::NMSBoxes(boxes_for_nms, confidences_for_nms, CONF_THRESHOLD, IOU_THRESHOLD, final_indices);
+        cv::dnn::NMSBoxesBatched(boxes_for_nms, confidences_for_nms, class_ids_for_nms, CONF_THRESHOLD, IOU_THRESHOLD, final_indices);
 
         std::vector<Detection> predictions_list;
         for (int i : final_indices) {
