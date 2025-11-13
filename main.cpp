@@ -262,14 +262,16 @@ int main() {
         return -1;
     }
     std::cout << "Camera opened. Starting continuous detection..." << std::endl;
-    std::cout << "Press 'q' to quit." << std::endl;
+    std::cout << "Press Ctrl+C to quit." << std::endl;
 
     cv::Mat frame;
     while (g_running) {
-        cap >> frame;
-        if (frame.empty()) {
-            std::cerr << "Error: Captured empty frame." << std::endl;
-            break;
+        if (!cap.isOpened() || !cap.read(frame) || frame.empty()) {
+            std::cerr << "Error: Camera disconnected or captured empty frame. Attempting to reconnect..." << std::endl;
+            cap.release();
+            std::this_thread::sleep_for(std::chrono::seconds(5)); // Wait 5 seconds
+            cap.open(0); // Try to reopen the camera
+            continue; // Skip the rest of this loop iteration
         }
 
         // --- Pre-processing ---
