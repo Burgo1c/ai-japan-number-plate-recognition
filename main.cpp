@@ -328,10 +328,15 @@ int main() {
             }
         }
 
-        // Convert Rect2f to Rect for NMSBoxes compatibility with older OpenCV versions
+        // --- FIXED: Convert Rect2f to Rect for older OpenCV versions ---
+        std::vector<cv::Rect> boxes_for_nms_int;
+        for(const auto& box : boxes_for_nms) {
+            boxes_for_nms_int.emplace_back(box); // This converts Rect2f to Rect
+        }
+
         std::vector<int> indices;
-        // Pass the float vector directly. No conversion needed.
-        cv::dnn::NMSBoxes(boxes_for_nms, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
+        // Pass the new vector of integers
+        cv::dnn::NMSBoxes(boxes_for_nms_int, confidences, CONF_THRESHOLD, IOU_THRESHOLD, indices);
 
         std::vector<Detection> predictions_list;
         if (!indices.empty()) {
