@@ -28,8 +28,8 @@
 #define TOSTRING(x) STRINGIFY(x)
 
 // --- 1. CONFIGURATION ---
-const std::string MODEL_PATH = "best_int8.tflite";
-const std::string DATA_YAML_PATH = "data.yaml";
+const std::string MODEL_PATH = "/home/raspi/ai-japan-number-plate-recognition/ai-model/best_int8.tflite";
+const std::string DATA_YAML_PATH = "/home/raspi/ai-japan-number-plate-recognition/ai-model/data.yaml";
 
 // Model parameters
 const int IMG_SIZE = 640;
