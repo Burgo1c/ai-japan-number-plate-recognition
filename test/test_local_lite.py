@@ -71,6 +71,14 @@ try:
     interpreter.allocate_tensors()
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
+
+    # --- ADD THIS DEBUG CODE ---
+    print("\n--- TFLite Output Details (DEBUG) ---")
+    for i, detail in enumerate(output_details):
+        print(f"Output index {i}: Name={detail['name']}, Shape={detail['shape']}, Dtype={detail['dtype']}")
+    print("---------------------------------------\n")
+    # --- END DEBUG CODE ---
+
     # Get input shape
     height = input_details[0]['shape'][1]
     width = input_details[0]['shape'][2]
