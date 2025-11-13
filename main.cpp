@@ -23,12 +23,11 @@
 #include <tesseract/baseapi.h>
 #include <leptonica/allheaders.h>
 
-// Helper macro to convert preprocessor definition to string
-#define STRINGIFY(x) #x
-#define TOSTRING(x) STRINGIFY(x)
-
 // --- 1. CONFIGURATION ---
-const std::string MODEL_PATH = "/home/raspi/ai-japan-number-plate-recognition/ai-model/best_int8.tflite";
+
+// !!! IMPORTANT !!!
+// Change this to the path of your NEW float16 model
+const std::string MODEL_PATH = "/home/raspi/ai-japan-number-plate-recognition/ai-model/best_fp16.tflite";
 const std::string DATA_YAML_PATH = "/home/raspi/ai-japan-number-plate-recognition/ai-model/data.yaml";
 
 // Model parameters
@@ -67,14 +66,14 @@ struct Detection {
     int class_id;
 };
 
-// --- Performance Implementation: Globals for Queue and Cache ---
+// --- Globals for Queue and Cache ---
 std::queue<std::string> plate_queue;
 std::mutex queue_mutex;
 std::condition_variable queue_cv;
 bool finished = false;
 
 std::map<std::string, std::chrono::steady_clock::time_point> recent_plates;
-const std::chrono::seconds CACHE_DURATION(30); // Don't resend the same plate for 30 seconds
+const std::chrono::seconds CACHE_DURATION(30);
 
 // --- Graceful Shutdown ---
 volatile sig_atomic_t g_running = 1;
@@ -96,7 +95,7 @@ void send_to_api(const std::string& complete_plate) {
         struct curl_slist *headers = NULL;
         headers = curl_slist_append(headers, "Content-Type: application/json");
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); // 10 second timeout
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); 
 
         CURLcode res = curl_easy_perform(curl);
         if(res != CURLE_OK) {
@@ -111,23 +110,20 @@ void send_to_api(const std::string& complete_plate) {
 }
 
 // --- Consumer Thread Function ---
-// This function runs in a separate thread, consuming plates from the queue.
 void api_consumer_thread() {
     while (true) {
         std::string plate_to_send;
         {
             std::unique_lock<std::mutex> lock(queue_mutex);
-            // Wait until the queue has something or the program is finished
             queue_cv.wait(lock, []{ return !plate_queue.empty() || finished; });
 
-            // If the program is finished and the queue is empty, exit the thread
             if (finished && plate_queue.empty()) {
                 break;
             }
 
             plate_to_send = plate_queue.front();
             plate_queue.pop();
-        } // Lock is released here
+        } 
 
         // --- API CALL REMAINS COMMENTED AS REQUESTED ---
         //send_to_api(plate_to_send);
@@ -142,7 +138,6 @@ std::string run_ocr(const cv::Mat& image) {
     }
 
     tesseract::TessBaseAPI ocr;
-    // Initialize tesseract-ocr with Japanese and English language packs.
     if (ocr.Init(NULL, "jpn+eng", tesseract::OEM_LSTM_ONLY)) {
         std::cerr << "Could not initialize tesseract." << std::endl;
         return "";
@@ -150,11 +145,9 @@ std::string run_ocr(const cv::Mat& image) {
 
     ocr.SetImage(image.data, image.cols, image.rows, image.channels(), image.step);
     
-    // Get OCR result
     char* outText = ocr.GetUTF8Text();
     std::string ocr_result(outText);
     
-    // Cleanup
     ocr.End();
     delete[] outText;
 
@@ -165,14 +158,19 @@ std::string run_ocr(const cv::Mat& image) {
 }
 
 
-// --- 2. PARSING FUNCTION ---
+// --- Helper function to check if a string is composed only of digits ---
+bool is_digit(const std::string& s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
+}
+
+// --- 2. PARSING FUNCTION (REVISED) ---
 std::pair<std::string, std::string> parse_plate_detections(const std::vector<Detection>& predictions, const std::string& ocr_text) {
     float divider_y = -1.0f;
 
     // Find the license plate and calculate its vertical center.
     for (const auto& p : predictions) {
         if (p.class_name == "NumberPLATE") {
-            divider_y = p.y + p.height / 2.0f;
+            divider_y = p.y + p.height / 2.0f; // Center Y of the plate
             break;
         }
     }
@@ -185,8 +183,10 @@ std::pair<std::string, std::string> parse_plate_detections(const std::vector<Det
     std::vector<Detection> top_row_detections, bottom_row_detections;
     for (const auto& p : predictions) {
         if (p.class_name == "NumberPLATE") continue;
+        
         // Use the character's vertical center for comparison.
-        if ((p.y + p.height / 2.0f) < divider_y) {
+        float char_center_y = p.y + p.height / 2.0f;
+        if (char_center_y < divider_y) {
             top_row_detections.push_back(p);
         } else {
             bottom_row_detections.push_back(p);
@@ -196,18 +196,43 @@ std::pair<std::string, std::string> parse_plate_detections(const std::vector<Det
     std::sort(top_row_detections.begin(), top_row_detections.end(), [](const Detection& a, const Detection& b) { return a.x < b.x; });
     std::sort(bottom_row_detections.begin(), bottom_row_detections.end(), [](const Detection& a, const Detection& b) { return a.x < b.x; });
 
-    std::stringstream top_ss, bottom_ss;
+    // --- Top Row Logic ---
+    std::stringstream top_ss;
     for (const auto& p : top_row_detections) {
         auto it = location_dictionary.find(p.class_name);
         top_ss << (it != location_dictionary.end() ? it->second : p.class_name);
     }
+    std::string yolo_top_string = top_ss.str();
+
+    // --- NEW Bottom Row Logic (from Python) ---
+    std::string hiragana_char;
+    std::string number_string;
     for (const auto& p : bottom_row_detections) {
-        auto it = location_dictionary.find(p.class_name);
-        bottom_ss << (it != location_dictionary.end() ? it->second : p.class_name);
+        if (is_digit(p.class_name)) {
+            number_string += p.class_name;
+        } else {
+            // Assume any non-digit is the hiragana
+            auto it = location_dictionary.find(p.class_name);
+            hiragana_char = (it != location_dictionary.end() ? it->second : p.class_name);
+        }
     }
 
-    std::string yolo_top_string = top_ss.str();
-    std::string bottom_string = bottom_ss.str();
+    // Add hyphen for 4-digit numbers
+    if (number_string.length() == 4) {
+        number_string.insert(2, "-");
+    }
+    
+    std::string bottom_string;
+    if (!hiragana_char.empty()) {
+        bottom_string += hiragana_char;
+        if (!number_string.empty()) {
+            bottom_string += " " + number_string;
+        }
+    } else {
+        bottom_string = number_string;
+    }
+    // --- End of NEW Bottom Row Logic ---
+
 
     // Use OCR text for the top row if available, otherwise fall back to YOLO
     std::string final_top_string = ocr_text.empty() ? yolo_top_string : ocr_text;
@@ -223,12 +248,9 @@ std::pair<std::string, std::string> parse_plate_detections(const std::vector<Det
 
 
 int main() {
-    // Register signal handler for Ctrl+C (SIGINT)
     signal(SIGINT, signal_handler);
-
     curl_global_init(CURL_GLOBAL_ALL);
 
-    // --- Start the consumer thread ---
     std::thread consumer_thread(api_consumer_thread);
     std::cout << "API consumer thread started." << std::endl;
 
@@ -261,15 +283,13 @@ int main() {
         return -1;
     }
 
-    // On a 4-core device like a Raspberry Pi 4, using 3 threads for inference
-    // leaves one core free for the OS, the main loop, and the API consumer thread.
-    // This prevents CPU contention and improves overall stability.
     interpreter->SetNumThreads(3);
     interpreter->AllocateTensors();
 
     int input_tensor_idx = interpreter->inputs()[0];
-    bool is_int8_model = (interpreter->tensor(input_tensor_idx)->type == kTfLiteUInt8);
-    std::cout << "Model loaded." << std::endl;
+    TfLiteType input_type = interpreter->tensor(input_tensor_idx)->type;
+    std::cout << "Model loaded." << (input_type == kTfLiteFloat32 ? " (Float32)" : (input_type == kTfLiteFloat16 ? " (Float16)" : " (Int8/Other)")) << std::endl;
+
 
     // --- 4. WEBCAM CAPTURE AND CONTINUOUS DETECTION ---
     cv::VideoCapture cap(0);
@@ -303,13 +323,20 @@ int main() {
         int left_pad = (IMG_SIZE - new_w) / 2;
         resized_img.copyTo(input_img(cv::Rect(left_pad, top_pad, new_w, new_h)));
 
-        if (is_int8_model) {
+        // --- Model Input Handling (Handles FP16/FP32/INT8) ---
+        if (input_type == kTfLiteFloat32) {
+            cv::Mat float_img;
+            input_img.convertTo(float_img, CV_32F, 1.0 / 255.0);
+            memcpy(interpreter->typed_tensor<float>(input_tensor_idx), float_img.data, float_img.total() * float_img.elemSize());
+        } else if (input_type == kTfLiteUInt8) {
             memcpy(interpreter->typed_tensor<uint8_t>(input_tensor_idx), input_img.data, input_img.total() * input_img.elemSize());
         } else {
+             // Assuming FP16 is treated like FP32 for input data conversion
             cv::Mat float_img;
             input_img.convertTo(float_img, CV_32F, 1.0 / 255.0);
             memcpy(interpreter->typed_tensor<float>(input_tensor_idx), float_img.data, float_img.total() * float_img.elemSize());
         }
+
 
         interpreter->Invoke();
 
@@ -319,11 +346,10 @@ int main() {
         const int num_classes = output_dims->data[1] - 4;
 
         // --- START NMS FIX ---
-        // Create separate lists for plates and characters
         std::vector<cv::Rect2f> char_boxes_for_nms;
         std::vector<float> char_confidences;
         std::vector<int> char_class_ids;
-        std::vector<Detection> plate_detections; // Store final NumberPLATE detections
+        std::vector<Detection> plate_detections; 
 
         for (int i = 0; i < num_proposals; ++i) {
             float max_conf = 0.0f;
@@ -345,7 +371,6 @@ int main() {
                 float h = output_data[i + 3 * num_proposals];
                 
                 if (class_name == "NumberPLATE") {
-                    // This is a plate, save it directly after un-scaling
                     Detection det;
                     det.x = (cx - w / 2 - left_pad) / scale;
                     det.y = (cy - h / 2 - top_pad) / scale;
@@ -356,7 +381,6 @@ int main() {
                     det.class_name = class_name;
                     plate_detections.push_back(det);
                 } else {
-                    // This is a character, add its *scaled* box for NMS
                     char_boxes_for_nms.emplace_back(cx - w / 2, cy - h / 2, w, h);
                     char_confidences.push_back(max_conf);
                     char_class_ids.push_back(class_id);
@@ -364,7 +388,6 @@ int main() {
             }
         }
 
-        // Convert char boxes for NMS
         std::vector<cv::Rect> char_boxes_for_nms_int;
         for(const auto& box : char_boxes_for_nms) {
             char_boxes_for_nms_int.emplace_back(box);
@@ -373,18 +396,13 @@ int main() {
         std::vector<int> char_indices;
         cv::dnn::NMSBoxes(char_boxes_for_nms_int, char_confidences, CONF_THRESHOLD, IOU_THRESHOLD, char_indices);
 
-        // This is the new final list
         std::vector<Detection> predictions_list; 
-        
-        // 1. Add all the plates we found
         predictions_list = plate_detections;
 
-        // 2. Add all the NMS-approved characters
         if (!char_indices.empty()) {
             for (int i : char_indices) {
-                cv::Rect2f box = char_boxes_for_nms[i]; // Use the original float box
+                cv::Rect2f box = char_boxes_for_nms[i]; 
                 Detection det;
-                // Un-scale the box coordinates
                 det.x = (box.x - left_pad) / scale;
                 det.y = (box.y - top_pad) / scale;
                 det.width = box.width / scale;
@@ -400,10 +418,8 @@ int main() {
         
         if (!predictions_list.empty()) {
             std::string ocr_top_row;
-            // Find the main number plate detection to run OCR on it
             for (const auto& det : predictions_list) {
                 if (det.class_name == "NumberPLATE") {
-                    // Clamp the bounding box to the frame dimensions
                     cv::Rect plate_roi(
                         std::max(0, static_cast<int>(det.x)),
                         std::max(0, static_cast<int>(det.y)),
@@ -415,24 +431,21 @@ int main() {
                         cv::Mat plate_img = frame(plate_roi);
                         
                         // --- START OCR IMPROVEMENT ---
-                        // Crop to the top 60% of the plate for better accuracy
                         cv::Rect ocr_crop_roi(
                             0, 
                             0, 
                             plate_img.cols, 
-                            static_cast<int>(plate_img.rows * 0.6)
+                            static_cast<int>(plate_img.rows * 0.6) // Crop to top 60%
                         );
                         cv::Mat top_half_plate = plate_img(ocr_crop_roi);
                         // --- END OCR IMPROVEMENT ---
 
-                        // Pre-process for OCR: grayscale and threshold
                         cv::Mat gray_plate, thresh_plate;
-                        // Run pre-processing on the *cropped* image
                         cv::cvtColor(top_half_plate, gray_plate, cv::COLOR_BGR2GRAY);
                         cv::threshold(gray_plate, thresh_plate, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
                         ocr_top_row = run_ocr(thresh_plate);
                     }
-                    break; // Assume only one NumberPLATE detection
+                    break; 
                 }
             }
 
@@ -457,7 +470,7 @@ int main() {
                         std::lock_guard<std::mutex> lock(queue_mutex);
                         plate_queue.push(complete_plate);
                     }
-                    queue_cv.notify_one(); // Notify the consumer thread
+                    queue_cv.notify_one(); 
                 }
             }
         }
@@ -470,8 +483,8 @@ int main() {
         std::lock_guard<std::mutex> lock(queue_mutex);
         finished = true;
     }
-    queue_cv.notify_one(); // Wake up consumer thread to exit
-    consumer_thread.join(); // Wait for the consumer thread to finish
+    queue_cv.notify_one(); 
+    consumer_thread.join(); 
 
     cap.release();
     cv::destroyAllWindows();
