@@ -19,7 +19,7 @@ except ImportError:
 
 # --- 1. CONFIGURATION ---
 # !!! UPDATE THESE PATHS !!!
-MODEL_PATH = '/home/raspi/ai-japan-number-plate-recognition/ai-model/best_int8.tflite' # <-- CHANGED
+MODEL_PATH = '/home/raspi/ai-japan-number-plate-recognition/ai-model/best_int8_new.tflite' # <-- CHANGED
 YAML_PATH = '/home/raspi/ai-japan-number-plate-recognition/ai-model/data.yaml'     # <-- ADDED
 IMAGE_PATH = '/home/raspi/ai-japan-number-plate-recognition/test/plate1.jpg'
 CONF_THRESHOLD = 0.5
@@ -231,3 +231,4 @@ for det in detections_for_drawing:
 cv2.imshow("Detections", frame)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
+
