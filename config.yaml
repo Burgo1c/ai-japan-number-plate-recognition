@@ -1,0 +1,28 @@
+model_path: 'ai-model/best.pt'
+edge_tpu_model_path : 'ai-model/best_edgetpu.tflite.pt'
+data_yaml_path: 'ai-model/data.yaml'
+location_dictionary : {
+    "a": "あ", "adati": "足立", "aidu": "会津", "akita": "秋田", "amami": "奄美", "aomori": "青森", "asahikawa": "旭川", "asuka": "飛鳥", "e": "え", "ehime": "愛媛",
+    "gihu": "岐阜", "gunma": "群馬", "ha": "は", "hakodate": "函館", "hamamatu": "浜松", "hatinohe": "八戸", "hatiouzi": "八王子", "he": "へ", "hi": "ひ",
+    "hida": "飛騨", "himezi": "姫路", "hiraizumi": "平泉", "hirosaki": "弘前", "hiroshima": "広島", "ho": "ほ", "hu": "ふ", "hukui": "福井",
+    "hukuoka": "福岡", "hukushima": "福島", "hukuyama": "福山", "hunabashi": "船橋", "huzisan": "富士山", "i": "い", "isesima": "伊勢志摩",
+    "isikawa": "石川", "itabashi": "板橋", "itihara": "市原", "itikawa": "市川", "itinomiya": "一宮", "iwaki": "いわき", "iwate": "岩手", "izu": "伊豆",
+    "izumi": "和泉", "izumo": "出雲", "ka": "か", "kagawa": "香川", "kagosima": "鹿児島", "kanazawa": "金沢", "kasiwa": "柏", "kasugai": "春日井",
+    "kasukabe": "春日部", "katusika": "葛飾", "kawagoe": "川越", "kawaguti": "川口", "kawasaki": "川崎", "ke": "け", "ki": "き", "kitakyusyu": "北九州",
+    "kitami": "北見", "ko": "こ", "koube": "神戸", "kouriyama": "郡山", "kouti": "高知", "kouto": "江東", "ku": "く", "kumagaya": "熊谷",
+    "kumamoto": "熊本", "kurasiki": "倉敷", "kusiro": "釧路", "kyoto": "京都", "ma": "ま", "maebashi": "前橋", "matudo": "松戸", "matumoto": "松本",
+    "me": "め", "mi": "み", "mie": "三重", "mikawa": "三河", "mito": "水戸", "miyagi": "宮城", "miyazaki": "宮崎", "mo": "も", "morioka": "盛岡",
+    "mu": "む", "muroran": "室蘭", "na": "な", "nagano": "長野", "nagaoka": "長岡", "nagasaki": "長崎", "nagoya": "名古屋", "naniwa": "なにわ",
+    "nara": "奈良", "narasino": "習志野", "narita": "成田", "nasu": "那須", "ne": "ね", "nerima": "練馬", "ni": "に", "nigata": "新潟", "no": "の",
+    "noda": "野田", "nu": "ぬ", "numadu": "沼津", "o": "お", "obihiro": "帯広", "oita": "大分", "okayama": "岡山", "okazaki": "岡崎", "okinawa": "沖縄",
+    "omiya": "大宮", "osaka": "大阪", "owarikomaki": "尾張小牧", "ra": "ら", "re": "れ", "ri": "り", "ro": "ろ", "ru": "る", "sa": "さ", "saga": "佐賀",
+    "sagami": "相模", "sakai": "堺", "sasebo": "佐世保", "se": "せ", "sendai": "仙台", "setagaya": "世田谷", "si": "し", "siga": "滋賀",
+    "simane": "島根", "simonoseki": "下関", "sinagawa": "品川", "sirakawa": "白河", "siretoko": "知床", "sizuoka": "静岡", "so": "そ",
+    "sodegaura": "袖ヶ浦", "su": "す", "suginami": "杉並", "suwa": "諏訪", "suzuka": "鈴鹿", "syounai": "庄内", "syounan": "湘南", "ta": "た",
+    "takamatu": "高松", "takasaki": "高崎", "tama": "多摩", "te": "て", "ti": "ち", "tiba": "千葉", "tikuho": "筑豊", "to": "と", "tokorozawa": "所沢",
+    "tokusima": "徳島", "tomakomaki": "苫小牧", "totigi": "栃木", "tottori": "鳥取", "toyama": "富山", "toyohasi": "豊橋", "toyota": "豊田", "tu": "つ",
+    "tukuba": "つくば", "tutiura": "土浦", "u": "う", "utunomiya": "宇都宮", "wa": "わ", "wo": "を", "ya": "や", "yamagata": "山形", "yamaguti": "山口",
+    "yamanashi": "山梨", "yo": "よ", "yokkaiti": "四日市", "yokohama": "横浜", "yu": "ゆ", "zyoetu": "上越"
+}
+
+use_hiragana : false
