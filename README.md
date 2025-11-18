@@ -1,1 +1,0 @@
-# ai-japan-number-plate-recognition
