@@ -1,5 +1,5 @@
 model_path: 'ai-model/best.pt'
-edge_tpu_model_path : 'ai-model/best_edgetpu.tflite.pt'
+edge_tpu_model_path : 'ai-model/edgetpu.tflite'
 data_yaml_path: 'ai-model/data.yaml'
 location_dictionary : {
     "a": "あ", "adati": "足立", "aidu": "会津", "akita": "秋田", "amami": "奄美", "aomori": "青森", "asahikawa": "旭川", "asuka": "飛鳥", "e": "え", "ehime": "愛媛",
@@ -26,3 +26,5 @@ location_dictionary : {
 }
 
 use_hiragana : false
+
+get_top_line : false
