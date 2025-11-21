@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 196
+names: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A-', 'C', 'H', 'K', 'N-', 'NumberPLATE', 'Y', 'Z', 'a', 'adati', 'aidu', 'akita', 'amami', 'aomori', 'asahikawa', 'asuka', 'bicycle', 'e', 'ehime', 'gihu', 'gunma', 'ha', 'hakodate', 'hamamatu', 'hatinohe', 'hatiouzi', 'he', 'hi', 'hida', 'himezi', 'hiraizumi', 'hirosaki', 'hiroshima', 'ho', 'hu', 'hukiu', 'hukiui', 'hukui', 'hukuoka', 'hukushima', 'hukuyama', 'hunabashi', 'huzisan', 'i', 'isesima', 'isikawa', 'itabashi', 'itihara', 'itikawa', 'itinomiya', 'iwaki', 'iwate', 'izu', 'izumi', 'izumo', 'ka', 'kagawa', 'kagosima', 'kanazawa', 'kasiwa', 'kasugai', 'kasukabe', 'katusika', 'kawagoe', 'kawaguti', 'kawasaki', 'ke', 'ki', 'kitakyusyu', 'kitami', 'ko', 'kosigaya', 'koube', 'kouriyama', 'kouti', 'kouto', 'ku', 'kumagaya', 'kumamoto', 'kurasiki', 'kusiro', 'kyoto', 'ma', 'maebashi', 'matudo', 'matumoto', 'me', 'mi', 'mie', 'mikawa', 'mito', 'miyagi', 'miyazaki', 'mo', 'morioka', 'mu', 'muroran', 'na', 'nagano', 'nagaoka', 'nagasaki', 'nagoya', 'naniwa', 'nara', 'narasino', 'narita', 'nasu', 'ne', 'nerima', 'ni', 'nigata', 'no', 'noda', 'nu', 'numadu', 'o', 'obihiro', 'oita', 'okayama', 'okazaki', 'okinawa', 'omiya', 'osaka', 'owarikomaki', 'ra', 're', 'ri', 'ro', 'ru', 'sa', 'saga', 'sagami', 'sakai', 'sasebo', 'se', 'sendai', 'setagaya', 'si', 'siga', 'simane', 'simonoseki', 'sinagawa', 'sirakawa', 'siretoko', 'sizuoka', 'so', 'sodegaura', 'su', 'suginami', 'suwa', 'suzuka', 'syounai', 'syounan', 'ta', 'takamatu', 'takasaki', 'tama', 'te', 'ti', 'tiba', 'tikuho', 'to', 'tokorozawa', 'tokusima', 'tomakomaki', 'totigi', 'tottori', 'toyama', 'toyohasi', 'toyota', 'tu', 'tukuba', 'tutiura', 'u', 'utunomiya', 'wa', 'wo', 'ya', 'yamagata', 'yamaguti', 'yamanashi', 'yo', 'yokkaiti', 'yokohama', 'yu', 'zyoetu']
+
+roboflow:
+  workspace: moriken
+  project: number-plate-in-japan
+  version: 3
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/moriken/number-plate-in-japan/dataset/3
