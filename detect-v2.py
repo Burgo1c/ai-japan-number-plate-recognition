@@ -53,32 +53,32 @@ import yaml
 import csv
 import os
 from pathlib import Path
-import RPi.GPIO as GPIO
+# import RPi.GPIO as GPIO
 
-# --- LED Configuration ---
-RED_LED_PIN = 27
-GREEN_LED_PIN = 17
+# # --- LED Configuration ---
+# RED_LED_PIN = 27
+# GREEN_LED_PIN = 17
 
-# Set up GPIO pins
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(RED_LED_PIN, GPIO.OUT)
-GPIO.setup(GREEN_LED_PIN, GPIO.OUT)
+# # Set up GPIO pins
+# GPIO.setmode(GPIO.BCM)
+# GPIO.setup(RED_LED_PIN, GPIO.OUT)
+# GPIO.setup(GREEN_LED_PIN, GPIO.OUT)
 
-# LED control functions
-def led_off():
-    """Turn off both LEDs"""
-    GPIO.output(RED_LED_PIN, GPIO.LOW)
-    GPIO.output(GREEN_LED_PIN, GPIO.LOW)
+# # LED control functions
+# def led_off():
+#     """Turn off both LEDs"""
+#     GPIO.output(RED_LED_PIN, GPIO.LOW)
+#     GPIO.output(GREEN_LED_PIN, GPIO.LOW)
 
-def led_green():
-    """Turn on green LED (system working correctly)"""
-    GPIO.output(RED_LED_PIN, GPIO.LOW)
-    GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
+# def led_green():
+#     """Turn on green LED (system working correctly)"""
+#     GPIO.output(RED_LED_PIN, GPIO.LOW)
+#     GPIO.output(GREEN_LED_PIN, GPIO.HIGH)
 
-def led_red():
-    """Turn on red LED (system error)"""
-    GPIO.output(RED_LED_PIN, GPIO.HIGH)
-    GPIO.output(GREEN_LED_PIN, GPIO.LOW)
+# def led_red():
+#     """Turn on red LED (system error)"""
+#     GPIO.output(RED_LED_PIN, GPIO.HIGH)
+#     GPIO.output(GREEN_LED_PIN, GPIO.LOW)
 
 # --- CSV and Video Logging Configuration ---
 home_dir = str(Path.home())
@@ -300,7 +300,7 @@ def worker():
 # Uses Picamera2 library specifically designed for Raspberry Pi cameras.
 print("Starting camera feed...")
 # Initialize LED (off at startup)
-led_off()
+# led_off()
 
 # Initialize Picamera2
 picam2 = Picamera2()
@@ -316,11 +316,11 @@ try:
     
     # Give the camera a moment to warm up and set auto-exposure
     time.sleep(1.0)
-    led_green()  # Show green LED to indicate system is working
+    # led_green()  # Show green LED to indicate system is working
 except Exception as e:
     print(f"Error: Could not open camera with picamera2: {e}")
     print("Ensure the camera is connected and enabled in raspi-config.")
-    led_red()  # Show error with red LED
+    # led_red()  # Show error with red LED
     exit()
 
 # Initialize video writer
@@ -330,7 +330,7 @@ video_writer = cv2.VideoWriter(video_file_path, fourcc, fps, (FRAME_WIDTH, FRAME
 
 if not video_writer.isOpened():
     print(f"Warning: Could not create video writer. Debug video will not be saved.")
-    led_red()  # Show error with red LED
+    # led_red()  # Show error with red LED
 else:
     print(f"Video recording initialized. Saving to {video_file_path}")
 
@@ -397,10 +397,10 @@ try:
 
 except KeyboardInterrupt:
     print("\nCaught Ctrl+C. Shutting down...")
-    led_off()  # Turn off LED on clean exit
+    # led_off()  # Turn off LED on clean exit
 except Exception as e:
     # Show red LED on error
-    led_red()
+    # led_red()
     print(f"Error: {e}")
 
 # --- 6. CLEANUP ---
@@ -412,6 +412,6 @@ if video_writer.isOpened():
     video_writer.release()
     print(f"Video saved to {video_file_path}")
 cv2.destroyAllWindows()
-GPIO.cleanup()  # Clean up GPIO pins
-led_off()  # Ensure LEDs are off
+# GPIO.cleanup()  # Clean up GPIO pins
+# led_off()  # Ensure LEDs are off
 print("Script finished.")
