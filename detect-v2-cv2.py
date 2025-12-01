@@ -53,6 +53,10 @@ import os
 from pathlib import Path
 # import RPi.GPIO as GPIO
 
+# Set environment variables to prefer V4L2 for Raspberry Pi camera
+os.environ["OPENCV_VIDEOIO_MMAL_ENABLE"] = "0"
+os.environ["OPENCV_VIDEOIO_V4L2_ENABLE"] = "1"
+
 # # --- LED Configuration ---
 # RED_LED_PIN = 27
 # GREEN_LED_PIN = 17
@@ -300,24 +304,55 @@ print("Starting camera feed...")
 # Initialize LED (off at startup)
 # led_off()
 
+# Function to initialize camera with multiple retries and configurations
+def initialize_camera(max_attempts=3):
+    """
+    Attempt to initialize the camera with multiple retries and configurations
+    """
+    for attempt in range(max_attempts):
+        for camera_idx in [0, 1, 2]:  # Try different camera indices
+            try:
+                print(f"Attempting to open camera at index {camera_idx} (attempt {attempt+1}/{max_attempts})...")
+                cap = cv2.VideoCapture(camera_idx, cv2.CAP_V4L2)
+                
+                # Set camera properties
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+                cap.set(cv2.CAP_PROP_FPS, 30)
+                
+                # Check if camera opened successfully
+                if cap.isOpened():
+                    # Verify we can actually read a frame
+                    ret, test_frame = cap.read()
+                    if ret:
+                        print(f"Successfully opened camera at index {camera_idx}")
+                        return cap
+                    else:
+                        print(f"Camera at index {camera_idx} opened but failed to read frame")
+                        cap.release()
+            except Exception as e:
+                print(f"Error opening camera at index {camera_idx}: {e}")
+        
+        # Wait before retrying
+        print(f"Failed to open any camera. Waiting before retry...")
+        time.sleep(2)
+    
+    raise Exception("Failed to initialize camera after multiple attempts")
+
 # Initialize OpenCV camera
 try:
-    cap = cv2.VideoCapture(0)  # Use camera index 0 (default camera)
-    
-    # Set camera resolution
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-    
-    # Check if camera opened successfully
-    if not cap.isOpened():
-        raise Exception("Could not open video device")
+    print("Initializing camera...")
+    cap = initialize_camera()
     
     # Give the camera a moment to warm up
     time.sleep(1.0)
+    print("Camera initialized successfully.")
     # led_green()  # Show green LED to indicate system is working
 except Exception as e:
     print(f"Error: Could not open camera with OpenCV: {e}")
-    print("Ensure the camera is connected and accessible.")
+    print("Ensure the camera is connected and the V4L2 driver is loaded.")
+    print("Try running: sudo modprobe bcm2835-v4l2")
     # led_red()  # Show error with red LED
     exit()
 
@@ -340,13 +375,31 @@ last_printed_bottom = ""
 
 try:
     while True:
-        # Capture frame from camera
-        ret, frame = cap.read()
+        # Capture frame from camera with retry logic
+        retry_count = 0
+        max_retries = 3
+        while retry_count < max_retries:
+            ret, frame = cap.read()
+            if ret:
+                break
+            
+            print(f"Warning: Failed to grab frame, retrying ({retry_count+1}/{max_retries})...")
+            retry_count += 1
+            time.sleep(0.5)
         
         if not ret:
-            print("Error: Failed to grab frame from camera")
+            print("Error: Failed to grab frame from camera after multiple attempts")
+            print("Attempting to reinitialize camera...")
             # led_red()  # Show error with red LED
-            break
+            
+            # Try to reinitialize the camera
+            cap.release()
+            try:
+                cap = initialize_camera()
+                continue  # Skip this iteration and try again with new camera
+            except Exception as e:
+                print(f"Error: Could not reinitialize camera: {e}")
+                break
         
         # Create a copy of the frame for visualization
         display_frame = frame.copy()
