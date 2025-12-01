@@ -14,9 +14,9 @@ Dependencies:
 - OpenCV (cv2)
 - Picamera2
 - NumPy
-- Ultralytics YOLO
 - PyYAML
-- PyCoral (for Edge TPU acceleration)
+- ai_edge_litert (for Edge TPU acceleration)
+- tensorflow (for Edge TPU acceleration)
 - RPi.GPIO (for LED status indicators)
 
 Hardware Requirements:
@@ -45,7 +45,8 @@ import cv2
 from picamera2 import Picamera2
 import numpy as np
 import time
-import tflite_runtime.interpreter as tflite
+from ai_edge_litert.interpreter import Interpreter
+import tensorflow as tf
 import threading
 import queue
 import yaml
@@ -156,18 +157,18 @@ except Exception as e:
     exit()
 
 
-# --- 2. INITIALIZE MODELS (Using tflite-runtime) ---
+# --- 2. INITIALIZE MODELS (Using ai-edge-litert) ---
 EDGETPU_SHARED_LIB = 'libedgetpu.so.1'
 
 print(f"Loading TFLite model ({MODEL_PATH}) with Edge TPU delegate...")
 try:
     # Load the Edge TPU delegate
-    delegates = [
-        tflite.load_delegate(EDGETPU_SHARED_LIB)
-    ]
+    edge_tpu_delegate = tf.lite.experimental.load_delegate(EDGETPU_SHARED_LIB)
+    
+    delegates = [edge_tpu_delegate]
     
     # Create and configure the interpreter
-    interpreter = tflite.Interpreter(
+    interpreter = Interpreter(
         model_path=MODEL_PATH,
         experimental_delegates=delegates
     )
@@ -181,7 +182,8 @@ try:
     print("TFLite Interpreter with Edge TPU delegate loaded.")
 except Exception as e:
     print(f"Error loading TFLite model from {MODEL_PATH} or loading delegate: {e}")
-    print("Ensure 'tflite-runtime' is installed and 'libedgetpu1-std' is installed on your OS.")
+    # CRITICAL FIX: Reference the correct package
+    print("Ensure 'ai-edge-litert' is installed, and 'libedgetpu1-std' (C++ Runtime) is installed on your OS.") 
     exit()
 
 # --- POST-PROCESSING FUNCTIONS (REQUIRED) ---
