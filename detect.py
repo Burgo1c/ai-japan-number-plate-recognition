@@ -137,15 +137,10 @@ def preprocess_image(image):
 
 
 # --- 4. INFERENCE FUNCTION ---
+# --- 4. INFERENCE FUNCTION (UPDATED) ---
 def run_inference(image):
     """
     Runs inference on the Edge TPU.
-    
-    Args:
-        image: Preprocessed image
-        
-    Returns:
-        List of detections with bounding boxes, classes, and scores
     """
     # Set input tensor
     interpreter.set_tensor(input_details[0]['index'], image)
@@ -153,11 +148,17 @@ def run_inference(image):
     # Run inference
     interpreter.invoke()
     
-    # Get output tensor - shape is [1, 2100, 200]
-    # 2100 = number of detection boxes
-    # 200 = 4 bbox coords + 196 class scores
+    # Get output tensor
     output_data = interpreter.get_tensor(output_details[0]['index'])[0]
     
+    # --- FIX: Check for Transposed Output ---
+    # If the second dimension (columns) is larger than the first (rows),
+    # the model is likely [Features, Boxes] instead of [Boxes, Features].
+    # We transpose it to match the code's expectation.
+    if output_data.shape[0] < output_data.shape[1]:
+        output_data = output_data.transpose()
+    # ----------------------------------------
+
     # Dequantize the output (INT8 to float) if quantization parameters exist
     quant_params = output_details[0].get('quantization_parameters', {})
     if quant_params and 'scales' in quant_params and len(quant_params['scales']) > 0:
@@ -165,7 +166,6 @@ def run_inference(image):
         zero_point = quant_params['zero_points'][0]
         output_data = (output_data.astype(np.float32) - zero_point) * scale
     else:
-        # No quantization or already dequantized
         output_data = output_data.astype(np.float32)
     
     detections = []
@@ -173,29 +173,39 @@ def run_inference(image):
     # Process each detection
     for detection in output_data:
         # First 4 values are bbox coordinates (center_x, center_y, width, height)
+        # We ensure we have enough data to avoid index errors on short arrays
+        if len(detection) < 5: 
+            continue
+
         center_x, center_y, width, height = detection[:4]
         
-        # Remaining 196 values are class scores
+        # Remaining values are class scores
         class_scores = detection[4:]
         
         # Get the class with highest score
         class_id = np.argmax(class_scores)
         confidence = class_scores[class_id]
         
-        # Apply sigmoid to confidence (if needed)
+        # Apply sigmoid to confidence (if needed - usually YOLO output is raw logits)
         confidence = 1 / (1 + np.exp(-confidence))
         
         if confidence >= CONF_THRESHOLD:
-            # Convert normalized coordinates to pixel coordinates
-            x_pixel = center_x * MODEL_INPUT_SIZE
-            y_pixel = center_y * MODEL_INPUT_SIZE
-            
-            detections.append({
-                "x": x_pixel,
-                "y": y_pixel,
-                "class": class_names[class_id],
-                "score": confidence
-            })
+            # SAFETY CHECK: Ensure class_id is within the bounds of your YAML list
+            if class_id < len(class_names):
+                # Convert normalized coordinates to pixel coordinates
+                x_pixel = center_x * MODEL_INPUT_SIZE
+                y_pixel = center_y * MODEL_INPUT_SIZE
+                
+                detections.append({
+                    "x": x_pixel,
+                    "y": y_pixel,
+                    "class": class_names[class_id],
+                    "score": confidence
+                })
+            else:
+                # Optional: Print warning if model predicts a class not in your YAML
+                # print(f"Warning: Detected class ID {class_id} not in data.yaml")
+                pass
     
     return detections
 
