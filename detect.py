@@ -153,32 +153,43 @@ def run_inference(image):
     # Run inference
     interpreter.invoke()
     
-    # Get output tensors
-    # Standard YOLO/SSD output format: boxes, classes, scores, num_detections
-    boxes = interpreter.get_tensor(output_details[0]['index'])[0]  # Bounding boxes
-    classes = interpreter.get_tensor(output_details[1]['index'])[0]  # Class IDs
-    scores = interpreter.get_tensor(output_details[2]['index'])[0]  # Confidence scores
-    num_detections = int(interpreter.get_tensor(output_details[3]['index'])[0])  # Number of detections
+    # Get output tensor - shape is [1, 2100, 200]
+    # 2100 = number of detection boxes
+    # 200 = 4 bbox coords + 196 class scores
+    output_data = interpreter.get_tensor(output_details[0]['index'])[0]
+    
+    # Dequantize the output (INT8 to float)
+    scale = output_details[0]['quantization'][0]
+    zero_point = output_details[0]['quantization'][1]
+    output_data = (output_data.astype(np.float32) - zero_point) * scale
     
     detections = []
-    for i in range(num_detections):
-        if scores[i] >= CONF_THRESHOLD:
-            # Boxes are in normalized coordinates [ymin, xmin, ymax, xmax]
-            ymin, xmin, ymax, xmax = boxes[i]
-            
-            # Convert to center x, y format (normalized 0-1)
-            center_x = (xmin + xmax) / 2
-            center_y = (ymin + ymax) / 2
-            
-            # Convert to pixel coordinates (640x640 model input)
+    
+    # Process each detection
+    for detection in output_data:
+        # First 4 values are bbox coordinates (center_x, center_y, width, height)
+        center_x, center_y, width, height = detection[:4]
+        
+        # Remaining 196 values are class scores
+        class_scores = detection[4:]
+        
+        # Get the class with highest score
+        class_id = np.argmax(class_scores)
+        confidence = class_scores[class_id]
+        
+        # Apply sigmoid to confidence (if needed)
+        confidence = 1 / (1 + np.exp(-confidence))
+        
+        if confidence >= CONF_THRESHOLD:
+            # Convert normalized coordinates to pixel coordinates
             x_pixel = center_x * MODEL_INPUT_SIZE
             y_pixel = center_y * MODEL_INPUT_SIZE
             
             detections.append({
                 "x": x_pixel,
                 "y": y_pixel,
-                "class": class_names[int(classes[i])],
-                "score": scores[i]
+                "class": class_names[class_id],
+                "score": confidence
             })
     
     return detections
