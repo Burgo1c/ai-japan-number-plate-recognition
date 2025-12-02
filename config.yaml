@@ -25,6 +25,21 @@ location_dictionary : {
     "yamanashi": "山梨", "yo": "よ", "yokkaiti": "四日市", "yokohama": "横浜", "yu": "ゆ", "zyoetu": "上越"
 }
 
-use_hiragana : false
+use_hiragana : true
 
 get_top_line : false
+
+# Video recording settings
+enable_recording: true
+output_directory: 'recordings'
+video_codec: 'mp4v'  # MP4 codec
+
+# Bounding box settings
+draw_bounding_boxes: true
+bbox_thickness: 2
+plate_bbox_color: [0, 255, 0]      # Green for license plate (BGR format)
+character_bbox_color: [255, 0, 0]   # Blue for characters (BGR format)
+
+# CSV logging settings
+enable_csv_logging: true
+csv_output_directory: 'logs'
