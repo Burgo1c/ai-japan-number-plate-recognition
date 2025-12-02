@@ -45,8 +45,7 @@ import cv2
 from picamera2 import Picamera2
 import numpy as np
 import time
-from ai_edge_litert.interpreter import Interpreter
-import tensorflow as tf
+import tflite_runtime.interpreter as tflite
 import threading
 import queue
 import yaml
@@ -162,28 +161,31 @@ EDGETPU_SHARED_LIB = 'libedgetpu.so.1'
 
 print(f"Loading TFLite model ({MODEL_PATH}) with Edge TPU delegate...")
 try:
-    # Load the Edge TPU delegate
-    edge_tpu_delegate = tf.lite.experimental.load_delegate(EDGETPU_SHARED_LIB)
+    # Load the Delegate specifically for tflite-runtime
+    # The 'libedgetpu.so.1' library is installed by libedgetpu1-std
+    delegate = tflite.load_delegate('libedgetpu.so.1')
     
-    delegates = [edge_tpu_delegate]
-    
-    # Create and configure the interpreter
-    interpreter = Interpreter(
+    # Create the interpreter
+    interpreter = tflite.Interpreter(
         model_path=MODEL_PATH,
-        experimental_delegates=delegates
+        experimental_delegates=[delegate]
     )
     interpreter.allocate_tensors()
     
-    # Get I/O details for later use
+    # Get I/O details
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
     INPUT_SHAPE = input_details[0]['shape'][1:3] # H, W
     
-    print("TFLite Interpreter with Edge TPU delegate loaded.")
+    print("Edge TPU Delegate loaded successfully.")
+
+except ValueError as e:
+    print("Error: Could not load Edge TPU delegate.")
+    print("Ensure you installed: sudo apt install libedgetpu1-std")
+    print(f"Details: {e}")
+    exit()
 except Exception as e:
-    print(f"Error loading TFLite model from {MODEL_PATH} or loading delegate: {e}")
-    # CRITICAL FIX: Reference the correct package
-    print("Ensure 'ai-edge-litert' is installed, and 'libedgetpu1-std' (C++ Runtime) is installed on your OS.") 
+    print(f"Error loading model: {e}")
     exit()
 
 # --- POST-PROCESSING FUNCTIONS (REQUIRED) ---
@@ -427,7 +429,7 @@ print("Starting camera feed...")
 picam2 = Picamera2()
 try:
     cam_config = picam2.create_video_configuration(
-        main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "XRGB8888"}
+        main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"}
     )
     picam2.configure(cam_config)
     
