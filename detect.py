@@ -38,6 +38,9 @@ import yaml
 from PIL import Image
 from tflite_runtime.interpreter import Interpreter
 from tflite_runtime.interpreter import load_delegate
+import os
+from datetime import datetime
+import csv
 
 # --- 1. CONFIGURATION ---
 # This section handles loading configuration settings and initializing constants
@@ -73,6 +76,19 @@ except FileNotFoundError:
 except Exception as e:
     print(f"Error loading {DATA_YAML_PATH}: {e}")
     exit()
+
+# --- Create output directories ---
+if config.get('enable_recording', False):
+    output_dir = config.get('output_directory', 'recordings')
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created output directory: {output_dir}")
+
+if config.get('enable_csv_logging', False):
+    csv_dir = config.get('csv_output_directory', 'logs')
+    if not os.path.exists(csv_dir):
+        os.makedirs(csv_dir)
+        print(f"Created CSV log directory: {csv_dir}")
 
 
 # --- 2. INITIALIZE EDGE TPU MODEL ---
@@ -333,8 +349,115 @@ except Exception as e:
 
 threading.Thread(target=worker, daemon=True).start()
 
+# --- Initialize Video Writer ---
+video_writer = None
+if config.get('enable_recording', False):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = config.get('output_directory', 'recordings')
+    video_filename = os.path.join(output_dir, f"recording_{timestamp}.mp4")
+    
+    # Define the codec and create VideoWriter object
+    fourcc = cv2.VideoWriter_fourcc(*config.get('video_codec', 'mp4v'))
+    video_writer = cv2.VideoWriter(video_filename, fourcc, 20.0, (FRAME_WIDTH, FRAME_HEIGHT))
+    
+    if video_writer.isOpened():
+        print(f"Recording to: {video_filename}")
+    else:
+        print(f"Warning: Could not initialize video writer for {video_filename}")
+        video_writer = None
+
+# --- Initialize CSV Logger ---
+csv_file = None
+csv_writer = None
+if config.get('enable_csv_logging', False):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_dir = config.get('csv_output_directory', 'logs')
+    csv_filename = os.path.join(csv_dir, f"detections_{timestamp}.csv")
+    
+    try:
+        csv_file = open(csv_filename, 'w', newline='', encoding='utf-8')
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(['Timestamp', 'Plate Number'])
+        print(f"Logging detections to: {csv_filename}")
+    except Exception as e:
+        print(f"Warning: Could not initialize CSV logger: {e}")
+        csv_file = None
+        csv_writer = None
+
+# Function to draw bounding boxes on frame
+def draw_bounding_boxes(frame, detections):
+    """
+    Draws bounding boxes on the frame for detected objects.
+    
+    Args:
+        frame: The frame to draw on
+        detections: List of detection dictionaries
+        
+    Returns:
+        Frame with bounding boxes drawn
+    """
+    if not config.get('draw_bounding_boxes', True):
+        return frame
+    
+    frame_with_boxes = frame.copy()
+    thickness = config.get('bbox_thickness', 2)
+    plate_color = tuple(config.get('plate_bbox_color', [0, 255, 0]))
+    char_color = tuple(config.get('character_bbox_color', [255, 0, 0]))
+    
+    # Scale factor from model input size to frame size
+    scale_x = FRAME_WIDTH / MODEL_INPUT_SIZE
+    scale_y = FRAME_HEIGHT / MODEL_INPUT_SIZE
+    
+    for detection in detections:
+        # Get detection info
+        class_name = detection['class']
+        confidence = detection['score']
+        
+        # Scale coordinates to frame size
+        cx = int(detection['x'] * scale_x)
+        cy = int(detection['y'] * scale_y)
+        
+        # Estimate box size (approximate, since we don't have exact w/h in final_detections)
+        # Using a fixed size based on typical character/plate dimensions
+        if class_name == "NumberPLATE":
+            w = int(100 * scale_x)
+            h = int(40 * scale_y)
+        else:
+            w = int(20 * scale_x)
+            h = int(30 * scale_y)
+        
+        x1 = int(cx - w / 2)
+        y1 = int(cy - h / 2)
+        x2 = int(cx + w / 2)
+        y2 = int(cy + h / 2)
+        
+        # Choose color based on class
+        color = plate_color if class_name == "NumberPLATE" else char_color
+        
+        # Draw rectangle
+        cv2.rectangle(frame_with_boxes, (x1, y1), (x2, y2), color, thickness)
+        
+        # Draw label with class name and confidence
+        label = f"{class_name}: {confidence:.2f}"
+        label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        label_y = max(y1 - 10, label_size[1])
+        
+        # Draw background for text
+        cv2.rectangle(frame_with_boxes, 
+                     (x1, label_y - label_size[1] - 5), 
+                     (x1 + label_size[0], label_y + 5), 
+                     color, -1)
+        
+        # Draw text
+        cv2.putText(frame_with_boxes, label, (x1, label_y), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    
+    return frame_with_boxes
+
 # Keep track of the last printed result to avoid spam
 last_printed_bottom = ""
+# Keep track of the latest frame with boxes for recording
+latest_frame_with_boxes = None
 
 try:
     while True:
@@ -350,6 +473,9 @@ try:
         try:
             plate_string, detections = result_queue.get_nowait()
             
+            # Draw bounding boxes on the frame
+            latest_frame_with_boxes = draw_bounding_boxes(frame, detections)
+            
             # --- CONSOLE OUTPUT ---
             new_result = False
             if plate_string and plate_string != last_printed_bottom:
@@ -357,13 +483,27 @@ try:
                 new_result = True
 
             if new_result:
+                current_time = datetime.now()
+                timestamp_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+                
                 print("--- Plate Detected ---")
-                print(f"Time:   {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"Time:   {timestamp_str}")
                 print(f"Plate:  {last_printed_bottom}")
                 print("----------------------")
+                
+                # Log to CSV if enabled
+                if csv_writer is not None:
+                    csv_writer.writerow([timestamp_str, last_printed_bottom])
+                    csv_file.flush()  # Ensure data is written immediately
             
         except queue.Empty:
-            pass  # No new result, just keep looping
+            # No new result, use the last frame with boxes if available
+            if latest_frame_with_boxes is None:
+                latest_frame_with_boxes = frame
+        
+        # Write frame to video if recording is enabled
+        if video_writer is not None and latest_frame_with_boxes is not None:
+            video_writer.write(latest_frame_with_boxes)
 
 except KeyboardInterrupt:
     print("\nCaught Ctrl+C. Shutting down...")
@@ -373,4 +513,15 @@ except KeyboardInterrupt:
 # Ensures resources are properly released.
 frame_queue.put(None)  # Signal worker to exit
 picam2.stop()
+
+# Release video writer if it was initialized
+if video_writer is not None:
+    video_writer.release()
+    print("Video recording saved successfully.")
+
+# Close CSV file if it was initialized
+if csv_file is not None:
+    csv_file.close()
+    print("CSV log file saved successfully.")
+
 print("Script finished.")
