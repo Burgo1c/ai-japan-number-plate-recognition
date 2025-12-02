@@ -137,29 +137,24 @@ def preprocess_image(image):
 
 
 # --- 4. INFERENCE FUNCTION ---
-# --- 4. INFERENCE FUNCTION (UPDATED) ---
+# --- 4. INFERENCE FUNCTION (FIXED with NMS) ---
 def run_inference(image):
     """
-    Runs inference on the Edge TPU.
+    Runs inference on the Edge TPU and applies NMS.
     """
-    # Set input tensor
     interpreter.set_tensor(input_details[0]['index'], image)
-    
-    # Run inference
     interpreter.invoke()
     
     # Get output tensor
     output_data = interpreter.get_tensor(output_details[0]['index'])[0]
     
-    # --- FIX: Check for Transposed Output ---
-    # If the second dimension (columns) is larger than the first (rows),
-    # the model is likely [Features, Boxes] instead of [Boxes, Features].
-    # We transpose it to match the code's expectation.
+    # --- FIX 1: Handle Transposed Output ---
+    # YOLOv8/v5 TFLite exports are often [Classes+4, Boxes] (e.g., [84, 8400]).
+    # We need them as [Boxes, Classes+4] (e.g., [8400, 84]).
     if output_data.shape[0] < output_data.shape[1]:
         output_data = output_data.transpose()
-    # ----------------------------------------
-
-    # Dequantize the output (INT8 to float) if quantization parameters exist
+        
+    # Dequantize (INT8 -> Float)
     quant_params = output_details[0].get('quantization_parameters', {})
     if quant_params and 'scales' in quant_params and len(quant_params['scales']) > 0:
         scale = quant_params['scales'][0]
@@ -167,48 +162,64 @@ def run_inference(image):
         output_data = (output_data.astype(np.float32) - zero_point) * scale
     else:
         output_data = output_data.astype(np.float32)
-    
-    detections = []
-    
-    # Process each detection
+
+    # Lists to hold candidate detections for NMS
+    boxes = []
+    confidences = []
+    class_ids = []
+
+    # Iterate over all rows (candidates)
     for detection in output_data:
-        # First 4 values are bbox coordinates (center_x, center_y, width, height)
-        # We ensure we have enough data to avoid index errors on short arrays
-        if len(detection) < 5: 
+        # Ignore rows that are too short (sanity check)
+        if len(detection) < 5:
             continue
 
-        center_x, center_y, width, height = detection[:4]
-        
-        # Remaining values are class scores
+        # Extract box and scores
+        # columns: 0=x, 1=y, 2=w, 3=h, 4...=class_scores
+        box = detection[:4]
         class_scores = detection[4:]
         
-        # Get the class with highest score
         class_id = np.argmax(class_scores)
         confidence = class_scores[class_id]
         
-        # Apply sigmoid to confidence (if needed - usually YOLO output is raw logits)
+        # Apply sigmoid if your model exports raw logits (common in YOLOv8)
+        # If your model already outputs 0-1 probabilities, you can remove this.
         confidence = 1 / (1 + np.exp(-confidence))
-        
-        if confidence >= CONF_THRESHOLD:
-            # SAFETY CHECK: Ensure class_id is within the bounds of your YAML list
-            if class_id < len(class_names):
-                # Convert normalized coordinates to pixel coordinates
-                x_pixel = center_x * MODEL_INPUT_SIZE
-                y_pixel = center_y * MODEL_INPUT_SIZE
-                
-                detections.append({
-                    "x": x_pixel,
-                    "y": y_pixel,
-                    "class": class_names[class_id],
-                    "score": confidence
-                })
-            else:
-                # Optional: Print warning if model predicts a class not in your YAML
-                # print(f"Warning: Detected class ID {class_id} not in data.yaml")
-                pass
-    
-    return detections
 
+        if confidence > CONF_THRESHOLD:
+            # Scale box to pixel coordinates
+            cx, cy, w, h = box
+            
+            # Convert center-x/y to top-left-x/y for NMS
+            x = int((cx - w / 2) * MODEL_INPUT_SIZE)
+            y = int((cy - h / 2) * MODEL_INPUT_SIZE)
+            w_pixel = int(w * MODEL_INPUT_SIZE)
+            h_pixel = int(h * MODEL_INPUT_SIZE)
+            
+            boxes.append([x, y, w_pixel, h_pixel])
+            confidences.append(float(confidence))
+            class_ids.append(int(class_id))
+
+    # --- FIX 2: Apply Non-Maximum Suppression (NMS) ---
+    # This removes overlapping boxes, keeping only the best one per object.
+    # threshold 0.4 means "if boxes overlap by more than 40%, remove the lower score one"
+    nms_threshold = 0.4  
+    indices = cv2.dnn.NMSBoxes(boxes, confidences, CONF_THRESHOLD, nms_threshold)
+
+    final_detections = []
+    if len(indices) > 0:
+        for i in indices.flatten():
+            # Check if class_id is valid for your yaml
+            cid = class_ids[i]
+            if cid < len(class_names):
+                final_detections.append({
+                    "x": boxes[i][0] + (boxes[i][2] / 2), # convert back to center X
+                    "y": boxes[i][1] + (boxes[i][3] / 2), # convert back to center Y
+                    "class": class_names[cid],
+                    "score": confidences[i]
+                })
+
+    return final_detections
 
 # --- 5. PARSING FUNCTION ---
 # This function processes detection results to extract license plate text.
