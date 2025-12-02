@@ -158,10 +158,15 @@ def run_inference(image):
     # 200 = 4 bbox coords + 196 class scores
     output_data = interpreter.get_tensor(output_details[0]['index'])[0]
     
-    # Dequantize the output (INT8 to float)
-    scale = output_details[0]['quantization'][0]
-    zero_point = output_details[0]['quantization'][1]
-    output_data = (output_data.astype(np.float32) - zero_point) * scale
+    # Dequantize the output (INT8 to float) if quantization parameters exist
+    quant_params = output_details[0].get('quantization_parameters', {})
+    if quant_params and 'scales' in quant_params and len(quant_params['scales']) > 0:
+        scale = quant_params['scales'][0]
+        zero_point = quant_params['zero_points'][0]
+        output_data = (output_data.astype(np.float32) - zero_point) * scale
+    else:
+        # No quantization or already dequantized
+        output_data = output_data.astype(np.float32)
     
     detections = []
     
