@@ -1,6 +1,6 @@
 model_path: 'ai-model/best.pt'
 edge_tpu_model_path : 'ai-model/edgetpu.tflite'
-onnx_model_path: 'ai-model/model.onnx'
+onnx_model_path: 'ai-model/best.onnx'
 data_yaml_path: 'ai-model/data.yaml'
 location_dictionary : {
     "a": "あ", "adati": "足立", "aidu": "会津", "akita": "秋田", "amami": "奄美", "aomori": "青森", "asahikawa": "旭川", "asuka": "飛鳥", "e": "え", "ehime": "愛媛",
@@ -28,21 +28,21 @@ location_dictionary : {
 
 use_hiragana : true
 
-get_top_line : false
+get_top_line : true
 
 # Video recording settings
-enable_recording: false
+enable_recording: true
 output_directory: 'recordings'
 video_codec: 'mp4v'  # MP4 codec
 
 # Bounding box settings
-draw_bounding_boxes: false
+draw_bounding_boxes: true
 bbox_thickness: 2
 plate_bbox_color: [0, 255, 0]      # Green for license plate (BGR format)
 character_bbox_color: [255, 0, 0]   # Blue for characters (BGR format)
 
 # CSV logging settings
-enable_csv_logging: false
+enable_csv_logging: true
 csv_output_directory: 'logs'
 
 # Display window settings
@@ -58,4 +58,3 @@ camera_buffer_size: 1       # Buffer size (1 = minimal latency)
 # Picamera2 shutter speed settings (for ONNX script)
 shutter_speed_us: 1000      # Shutter speed in microseconds (1000 = 1/1000s, 500 = 1/2000s)
 analogue_gain: 2.0          # Camera gain to compensate for fast shutter (higher = brighter)
-

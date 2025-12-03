@@ -45,7 +45,7 @@ import csv
 CONF_THRESHOLD = 0.5
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
-MODEL_INPUT_SIZE = 320  # ONNX model input size (320x320)
+MODEL_INPUT_SIZE = 640  # ONNX model input size (640x640)
 
 # --- Load Configuration ---
 try:
