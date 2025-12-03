@@ -48,3 +48,8 @@ csv_output_directory: 'logs'
 window_width_percent: 80    # Percentage of screen width for initial window size
 window_height_percent: 80   # Percentage of screen height for initial window size
 enable_fullscreen: false    # Start in fullscreen mode
+
+# Camera quality settings
+camera_fps: 30              # Frames per second (higher = smoother but more CPU)
+camera_codec: 'MJPG'        # Video codec: 'MJPG' (better quality) or 'YUYV' (faster)
+camera_buffer_size: 1       # Buffer size (1 = minimal latency)
