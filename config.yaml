@@ -1,5 +1,6 @@
 model_path: 'ai-model/best.pt'
 edge_tpu_model_path : 'ai-model/edgetpu.tflite'
+onnx_model_path: 'ai-model/model.onnx'
 data_yaml_path: 'ai-model/data.yaml'
 location_dictionary : {
     "a": "あ", "adati": "足立", "aidu": "会津", "akita": "秋田", "amami": "奄美", "aomori": "青森", "asahikawa": "旭川", "asuka": "飛鳥", "e": "え", "ehime": "愛媛",
@@ -53,3 +54,7 @@ enable_fullscreen: false    # Start in fullscreen mode
 camera_fps: 30              # Frames per second (higher = smoother but more CPU)
 camera_codec: 'MJPG'        # Video codec: 'MJPG' (better quality) or 'YUYV' (faster)
 camera_buffer_size: 1       # Buffer size (1 = minimal latency)
+
+# Picamera2 shutter speed settings (for ONNX script)
+shutter_speed_us: 1000      # Shutter speed in microseconds (1000 = 1/1000s, 500 = 1/2000s)
+analogue_gain: 2.0          # Camera gain to compensate for fast shutter (higher = brighter)
