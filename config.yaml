@@ -27,7 +27,7 @@ location_dictionary : {
 
 use_hiragana : true
 
-get_top_line : false
+get_top_line : true
 
 # Video recording settings
 enable_recording: true
@@ -43,3 +43,8 @@ character_bbox_color: [255, 0, 0]   # Blue for characters (BGR format)
 # CSV logging settings
 enable_csv_logging: true
 csv_output_directory: 'logs'
+
+# Display window settings
+window_width_percent: 80    # Percentage of screen width for initial window size
+window_height_percent: 80   # Percentage of screen height for initial window size
+enable_fullscreen: false    # Start in fullscreen mode
