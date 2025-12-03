@@ -23,6 +23,7 @@ Usage:
 - Ensure config.yaml is properly configured
 - Run the script: python detect-cv2-display.py
 - Press 'q' or ESC to exit
+- Press 'f' to toggle fullscreen mode
 """
 
 import cv2
@@ -191,13 +192,22 @@ def worker():
 # Handles camera initialization, frame capture, result display, and video window.
 # Uses OpenCV's VideoCapture for standard USB camera support.
 print("Starting camera feed...")
-cap = cv2.VideoCapture(1)
+
+# Use CAP_DSHOW backend on Windows for faster startup
+# CAP_DSHOW is more reliable and faster than the default backend on Windows
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
 
 if not cap.isOpened():
     print("Error: Could not open video stream.")
     exit()
+
+# Warm up the camera by capturing and discarding initial frames
+# This helps stabilize the camera and improves startup performance
+print("Warming up camera...")
+for _ in range(5):
+    cap.read()
 
 print("Camera started. Running detection loop (press 'q' or ESC to stop)...")
 
@@ -277,8 +287,38 @@ last_printed_bottom = ""
 # Keep track of the latest frame with boxes for recording and display
 latest_frame_with_boxes = None
 
-# Create window for video display
+# Create window for video display with resizable option
 cv2.namedWindow('License Plate Detection', cv2.WINDOW_NORMAL)
+
+# Get screen dimensions and set initial window size based on config
+try:
+    import tkinter as tk
+    root = tk.Tk()
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    root.destroy()
+    
+    # Calculate window size based on percentage from config
+    window_width_percent = config.get('window_width_percent', 80)
+    window_height_percent = config.get('window_height_percent', 80)
+    
+    window_width = int(screen_width * window_width_percent / 100)
+    window_height = int(screen_height * window_height_percent / 100)
+    
+    # Set window size
+    cv2.resizeWindow('License Plate Detection', window_width, window_height)
+    
+    # Set fullscreen if configured
+    if config.get('enable_fullscreen', False):
+        cv2.setWindowProperty('License Plate Detection', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    
+    print(f"Display window initialized: {window_width}x{window_height} ({window_width_percent}% x {window_height_percent}% of screen)")
+except Exception as e:
+    print(f"Could not set window size automatically: {e}")
+    print("Window will use default size (you can still resize manually)")
+
+# Track fullscreen state for toggle
+is_fullscreen = config.get('enable_fullscreen', False)
 
 try:
     while True:
@@ -331,11 +371,19 @@ try:
         if video_writer is not None and latest_frame_with_boxes is not None:
             video_writer.write(latest_frame_with_boxes)
         
-        # Check for key press to exit (q or ESC)
+        # Check for key press to exit (q or ESC) or toggle fullscreen (f)
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q') or key == 27:  # 27 is ESC key
             print("\nExiting...")
             break
+        elif key == ord('f'):  # Toggle fullscreen
+            is_fullscreen = not is_fullscreen
+            if is_fullscreen:
+                cv2.setWindowProperty('License Plate Detection', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+                print("Fullscreen mode enabled")
+            else:
+                cv2.setWindowProperty('License Plate Detection', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+                print("Fullscreen mode disabled")
 
 except KeyboardInterrupt:
     print("\nCaught Ctrl+C. Shutting down...")
