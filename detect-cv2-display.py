@@ -196,12 +196,37 @@ print("Starting camera feed...")
 # Use CAP_DSHOW backend on Windows for faster startup
 # CAP_DSHOW is more reliable and faster than the default backend on Windows
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+
+# Set camera resolution
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+
+# Set camera quality settings from config
+camera_fps = config.get('camera_fps', 30)
+camera_codec = config.get('camera_codec', 'MJPG')
+camera_buffer_size = config.get('camera_buffer_size', 1)
+
+# Set FPS for smoother video
+cap.set(cv2.CAP_PROP_FPS, camera_fps)
+
+# Set codec for better quality (MJPG typically provides better quality than YUYV)
+if camera_codec:
+    fourcc = cv2.VideoWriter_fourcc(*camera_codec)
+    cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+    print(f"Camera codec set to: {camera_codec}")
+
+# Set buffer size to reduce latency
+cap.set(cv2.CAP_PROP_BUFFERSIZE, camera_buffer_size)
 
 if not cap.isOpened():
     print("Error: Could not open video stream.")
     exit()
+
+# Print actual camera settings
+actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+actual_fps = int(cap.get(cv2.CAP_PROP_FPS))
+print(f"Camera settings: {actual_width}x{actual_height} @ {actual_fps} FPS")
 
 # Warm up the camera by capturing and discarding initial frames
 # This helps stabilize the camera and improves startup performance
