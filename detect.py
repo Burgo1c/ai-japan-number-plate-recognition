@@ -174,36 +174,79 @@ def preprocess_image(image, input_size=640):
     return chw, scale, pad_w, pad_h
 
 def postprocess_output(output, scale, pad_w, pad_h, conf_threshold=0.5):
-    detections = []
-    if len(output.shape) == 3: output = np.squeeze(output)
-    if output.shape[0] == (len(class_names) + 4): output = output.transpose() 
+    # NMS Threshold: Controls how much overlap is allowed. 
+    # 0.4 means if two boxes overlap by more than 40%, remove the lower confidence one.
+    NMS_THRESHOLD = 0.4
     
+    # Lists to store candidate detections
+    boxes = []
+    confidences = []
+    class_ids = []
+    
+    # 1. Handle Batch Dimension & Transpose (Same as before)
+    if len(output.shape) == 3:
+        output = np.squeeze(output)
+    if output.shape[0] == (len(class_names) + 4): 
+        output = output.transpose() 
+    
+    # 2. Collect all candidate boxes
     for detection in output:
+        # detection: [x, y, w, h, score_class0, ... score_classN]
         class_scores = detection[4:]
         max_conf = np.max(class_scores)
         
         if max_conf >= conf_threshold:
             class_id = np.argmax(class_scores)
+            
+            # Safety check
             if class_id >= len(class_names): continue
             
             x_center, y_center, width, height = detection[0:4]
+            
+            # Undo padding and scaling to get original image coordinates
             x_center = (x_center - pad_w) / scale
             y_center = (y_center - pad_h) / scale
             w_original = width / scale
             h_original = height / scale
             
-            x1 = x_center - w_original / 2
-            y1 = y_center - h_original / 2
-            x2 = x_center + w_original / 2
-            y2 = y_center + h_original / 2
+            # Convert Center-XYWH to TopLeft-XYWH for NMSBoxes
+            x_top = int(x_center - w_original / 2)
+            y_top = int(y_center - h_original / 2)
+            w_int = int(w_original)
+            h_int = int(h_original)
             
-            detections.append({
-                "x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2),
-                "x": x_center, "y": y_center,
-                "class": class_names[class_id],
-                "confidence": float(max_conf)
+            boxes.append([x_top, y_top, w_int, h_int])
+            confidences.append(float(max_conf))
+            class_ids.append(int(class_id))
+    
+    # 3. Apply Non-Maximum Suppression (NMS)
+    # This returns the indices of the "winning" boxes
+    indices = cv2.dnn.NMSBoxes(boxes, confidences, conf_threshold, NMS_THRESHOLD)
+    
+    final_detections = []
+    
+    # 4. Build final result list
+    if len(indices) > 0:
+        for i in indices.flatten():
+            # Get original coordinate data
+            x, y, w, h = boxes[i]
+            
+            # Calculate Center X/Y for your sorting logic later
+            center_x = x + w / 2
+            center_y = y + h / 2
+            
+            final_detections.append({
+                "x1": x,
+                "y1": y,
+                "x2": x + w,
+                "y2": y + h,
+                "x": center_x,      # Used for sorting left-to-right
+                "y": center_y,      # Used for sorting top-to-bottom
+                "class": class_names[class_ids[i]],
+                "confidence": confidences[i]
             })
-    return detections
+    
+    return final_detections
 
 def ncnn_inference(frame):
     input_data, scale, pad_w, pad_h = preprocess_image(frame, INPUT_SIZE)
