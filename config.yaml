@@ -1,7 +1,10 @@
 model_path: 'ai-model/best.pt'
 edge_tpu_model_path : 'ai-model/edgetpu.tflite'
-onnx_model_path: 'ai-model/best.onnx'
 data_yaml_path: 'ai-model/data.yaml'
+best_ncnn_model: 'ai-model/best_ncnn_model'
+
+camera_type: 'picamera'
+
 location_dictionary : {
     "a": "あ", "adati": "足立", "aidu": "会津", "akita": "秋田", "amami": "奄美", "aomori": "青森", "asahikawa": "旭川", "asuka": "飛鳥", "e": "え", "ehime": "愛媛",
     "gihu": "岐阜", "gunma": "群馬", "ha": "は", "hakodate": "函館", "hamamatu": "浜松", "hatinohe": "八戸", "hatiouzi": "八王子", "he": "へ", "hi": "ひ",
@@ -26,23 +29,23 @@ location_dictionary : {
     "yamanashi": "山梨", "yo": "よ", "yokkaiti": "四日市", "yokohama": "横浜", "yu": "ゆ", "zyoetu": "上越"
 }
 
-use_hiragana : true
+use_hiragana : false
 
-get_top_line : true
+get_top_line : false
 
 # Video recording settings
-enable_recording: true
+enable_recording: false
 output_directory: 'recordings'
 video_codec: 'mp4v'  # MP4 codec
 
 # Bounding box settings
-draw_bounding_boxes: true
+draw_bounding_boxes: false
 bbox_thickness: 2
 plate_bbox_color: [0, 255, 0]      # Green for license plate (BGR format)
 character_bbox_color: [255, 0, 0]   # Blue for characters (BGR format)
 
 # CSV logging settings
-enable_csv_logging: true
+enable_csv_logging: false
 csv_output_directory: 'logs'
 
 # Display window settings
